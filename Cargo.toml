@@ -4,6 +4,9 @@ members = [
     "crates/zero-core",
     "crates/zero-bus",
     "crates/zero-motion",
+    "crates/zero-hal",
+    "crates/zero-dsp",
+    "crates/zero-modbus",
 ]
 
 [workspace.package]

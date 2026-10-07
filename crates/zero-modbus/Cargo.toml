@@ -1,0 +1,18 @@
+[package]
+name = "zero-modbus"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Industrial Modbus RTU (Serial) and Modbus TCP protocol engine with zero-allocation PDU parsing for ZeroRust"
+readme = "README.md"
+keywords = ["modbus", "modbus-rtu", "modbus-tcp", "industrial", "scada"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

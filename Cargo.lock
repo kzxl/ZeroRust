@@ -20,6 +20,28 @@ name = "zero-core"
 version = "0.1.0"
 
 [[package]]
+name = "zero-dsp"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "zero-core",
+]
+
+[[package]]
+name = "zero-hal"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
+name = "zero-modbus"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-motion"
 version = "0.1.0"
 dependencies = [

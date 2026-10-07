@@ -1,0 +1,18 @@
+[package]
+name = "zero-hal"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hardware Abstraction Layer for Industrial I/O, Quadrature Encoders, Step/Dir pulse trains, and Debouncing for ZeroRust"
+readme = "README.md"
+keywords = ["hal", "industrial-io", "encoder", "stepper", "pwm"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
