@@ -48,7 +48,7 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 
 ---
 
-## 📦 Crates Overview (16 Crates)
+## 📦 Crates Overview (17 Crates)
 
 | Crate | Capabilities | Target Environments |
 | :--- | :--- | :--- |
@@ -68,6 +68,7 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 | **[`zero-sys`](crates/zero-sys)** | Sovereign Linux system telemetry (`/proc/stat`, `/proc/meminfo`, `/proc/net/dev`), Systemd service management, POSIX web root permissions | Linux Edge Gateways, Sovereign Web Hosting (ZPanl) |
 | **[`zero-fastcgi`](crates/zero-fastcgi)** | Pure Rust FastCGI v1.0 binary framing & client, zero-alloc name-value encoding, PHP-FPM worker pool configuration generator | PHP application hosting, ZPanl web engine, API gateways |
 | **[`zero-caddy`](crates/zero-caddy)** | Caddy v2 reverse proxy configuration, Caddyfile & JSON route builders (Static/SPA/PHP-FPM), Caddy Admin API (`POST /load`) client | Reverse proxy automation, dynamic SSL routing, ZPanl |
+| **[`zero-vfs`](crates/zero-vfs)** | Virtual file system security jail, path traversal prevention, atomic staging rename protocol, zero-alloc MIME engine | Sovereign Web File Manager, ZPanl storage, secure editors |
 
 ---
 

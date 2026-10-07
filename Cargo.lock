@@ -117,6 +117,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zero-vfs"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-vision"
 version = "0.1.0"
 dependencies = [

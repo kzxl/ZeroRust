@@ -17,6 +17,7 @@ members = [
     "crates/zero-sys",
     "crates/zero-fastcgi",
     "crates/zero-caddy",
+    "crates/zero-vfs",
 ]
 
 [workspace.package]
