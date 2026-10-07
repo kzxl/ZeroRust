@@ -1,0 +1,18 @@
+[package]
+name = "zero-bus"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Real-time industrial fieldbus suite: CAN 2.0/FD, CANopen CiA 301, and CiA 402 Servo Drive Profile for ZeroRust"
+readme = "README.md"
+keywords = ["can", "canopen", "cia402", "fieldbus", "servo"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

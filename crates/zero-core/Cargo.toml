@@ -1,0 +1,17 @@
+[package]
+name = "zero-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic no_std primitives, lock-free ring buffers, zero-copy byte parsers, and fixed-point math for ZeroRust"
+readme = "README.md"
+keywords = ["no-std", "lock-free", "ring-buffer", "zero-copy", "real-time"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = []
+
+[dependencies]

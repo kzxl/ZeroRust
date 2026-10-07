@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/zero-core",
+    "crates/zero-bus",
+    "crates/zero-motion",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Phong Vo <phong.vo@zerouniverse.io>", "ZeroUniverse Team"]
+license = "MIT"
+repository = "https://github.com/kzxl/ZeroRust"
+homepage = "https://github.com/kzxl/ZeroRust"
+keywords = ["industrial-automation", "robotics", "real-time", "canopen", "motion-control"]
+categories = ["embedded", "hardware-support", "science::robotics", "no-std"]
+readme = "README.md"
