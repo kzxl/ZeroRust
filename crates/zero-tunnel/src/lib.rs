@@ -9,13 +9,19 @@
 #![warn(missing_docs)]
 
 pub mod crypto;
+pub mod discovery;
+pub mod identity;
 pub mod jitter;
 pub mod proto;
+pub mod reconnect;
 pub mod stun;
 
 pub use crypto::{chacha20_block, chacha20_xor, CryptoSession, KEY_BYTES, NONCE_BYTES, TAG_BYTES};
+pub use discovery::{DiscoveredPeer, DiscoveryBeacon, DiscoveryManager};
+pub use identity::{DeviceId, PasswordGenerator};
 pub use jitter::{FrameJitterBuffer, JitterAction};
 pub use proto::{
     ZProtoChannel, ZProtoHeader, ZProtoPacket, ZProtoPacketType, ZPROTO_MAGIC, ZPROTO_VERSION,
 };
+pub use reconnect::{ReconnectManager, ReconnectPolicy, ReconnectState};
 pub use stun::{NatType, StunMessage, STUN_MAGIC_COOKIE};

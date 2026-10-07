@@ -86,3 +86,40 @@ pub unsafe extern "C" fn zconn_client_send_mouse(
     std::ptr::copy_nonoverlapping(pkt.as_ptr(), out_buf, pkt.len());
     pkt.len() as i32
 }
+
+/// Retrieves the local machine's formatted 9-digit device ID (e.g. "912 345 678").
+///
+/// # Safety
+/// `out_buf` must be a valid non-null pointer with at least `max_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zconn_get_local_device_id(out_buf: *mut u8, max_len: usize) -> i32 {
+    if out_buf.is_null() || max_len < 12 {
+        return -1;
+    }
+    let dev = zero_tunnel::DeviceId::generate_local();
+    let s = dev.to_formatted_string();
+    let bytes = s.as_bytes();
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+    if max_len > bytes.len() {
+        *out_buf.add(bytes.len()) = 0; // Null-terminate for C/C# PInvoke
+    }
+    bytes.len() as i32
+}
+
+/// Generates a random 6-character one-time session PIN.
+///
+/// # Safety
+/// `out_buf` must be a valid non-null pointer with at least `max_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn zconn_generate_pin(seed: u64, out_buf: *mut u8, max_len: usize) -> i32 {
+    if out_buf.is_null() || max_len < 7 {
+        return -1;
+    }
+    let pin = zero_tunnel::PasswordGenerator::generate_pin(seed);
+    let bytes = pin.as_bytes();
+    std::ptr::copy_nonoverlapping(bytes.as_ptr(), out_buf, bytes.len());
+    if max_len > bytes.len() {
+        *out_buf.add(bytes.len()) = 0; // Null-terminate for C/C# PInvoke
+    }
+    bytes.len() as i32
+}

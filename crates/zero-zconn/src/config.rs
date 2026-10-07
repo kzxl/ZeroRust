@@ -5,13 +5,27 @@ use std::net::SocketAddr;
 /// Streaming quality and performance preset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum QualityPreset {
-    /// Ultra-low latency mode (<10ms) prioritizing responsive gaming / CAD interaction.
+    /// Ultra-low latency mode (<10ms) prioritizing responsive gaming / CAD interaction (SpeedFirst).
     UltraLowLatency,
     /// Balanced everyday mode prioritizing text clarity with smooth 60 FPS motion.
     #[default]
     Balanced,
-    /// High-fidelity mode prioritizing 100% pixel-perfect lossless text rendering.
+    /// High-fidelity mode prioritizing 100% pixel-perfect lossless text rendering (QualityFirst).
     HighFidelity,
+    /// Auto mode dynamically adapting frame rate and quantization to measured network RTT & loss.
+    Auto,
+}
+
+impl QualityPreset {
+    /// Friendly display name.
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::UltraLowLatency => "SpeedFirst (Ultra-Low Latency)",
+            Self::Balanced => "Balanced",
+            Self::HighFidelity => "QualityFirst (Lossless Text)",
+            Self::Auto => "Auto (Adaptive Bitrate)",
+        }
+    }
 }
 
 /// Host daemon configuration.

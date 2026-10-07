@@ -12,11 +12,13 @@ pub mod client;
 pub mod config;
 pub mod ffi;
 pub mod host;
+pub mod recent;
 pub mod session;
 
 pub use client::ZConnClient;
 pub use config::{ClientConfig, HostConfig, QualityPreset};
 pub use host::ZConnHost;
+pub use recent::{RecentSession, RecentStore};
 pub use session::{DeviceInfo, SessionMetrics, SessionState};
 
 #[cfg(test)]

@@ -48,12 +48,26 @@ pub enum ZProtoPacketType {
     Ping = 0x03,
     /// Heartbeat pong.
     Pong = 0x04,
+    /// Local LAN discovery broadcast beacon.
+    DiscoveryBeacon = 0x05,
+    /// Session fast reconnection request with resume token.
+    SessionResume = 0x06,
+    /// Session fast reconnection accepted.
+    SessionResumeAck = 0x07,
     /// Video screen tile payload fragment.
     TileData = 0x10,
     /// Synthetic input injection payload.
     InputEvent = 0x20,
     /// Clipboard synchronization payload.
     Clipboard = 0x30,
+    /// File transfer initiation metadata.
+    FileInit = 0x40,
+    /// File transfer data chunk.
+    FileChunk = 0x41,
+    /// File transfer chunk acknowledgment.
+    FileAck = 0x42,
+    /// File transfer cancellation.
+    FileCancel = 0x43,
 }
 
 impl ZProtoPacketType {
@@ -64,9 +78,16 @@ impl ZProtoPacketType {
             0x02 => Some(Self::HandshakeAck),
             0x03 => Some(Self::Ping),
             0x04 => Some(Self::Pong),
+            0x05 => Some(Self::DiscoveryBeacon),
+            0x06 => Some(Self::SessionResume),
+            0x07 => Some(Self::SessionResumeAck),
             0x10 => Some(Self::TileData),
             0x20 => Some(Self::InputEvent),
             0x30 => Some(Self::Clipboard),
+            0x40 => Some(Self::FileInit),
+            0x41 => Some(Self::FileChunk),
+            0x42 => Some(Self::FileAck),
+            0x43 => Some(Self::FileCancel),
             _ => None,
         }
     }
