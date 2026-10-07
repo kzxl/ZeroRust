@@ -1,0 +1,19 @@
+[package]
+name = "zero-tinyai"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Edge Neuromorphic & TinyAI engine: Int8 quantized forward pass, Conv1D, and Anomaly Detection AutoEncoder for predictive maintenance on microcontrollers"
+readme = "README.md"
+keywords = ["tinyai", "quantization", "int8", "autoencoder", "predictive-maintenance"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std", "zero-dsp/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+zero-dsp = { path = "../zero-dsp", default-features = false }

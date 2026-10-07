@@ -1,0 +1,18 @@
+[package]
+name = "zero-plc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic Soft-PLC runtime: IEC 61131-3 bytecode virtual machine, standard function blocks (TON, CTU, PID_Compact), and zero-downtime hot reload for ZeroRust"
+readme = "README.md"
+keywords = ["plc", "iec61131-3", "soft-plc", "virtual-machine", "real-time"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

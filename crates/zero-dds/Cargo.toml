@@ -1,0 +1,18 @@
+[package]
+name = "zero-dds"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Micro-ROS & DDS direct link: pure Rust zero-allocation CDR serializer, ROS 2 standard messages, and Micro-XRCE-DDS client for ZeroRust"
+readme = "README.md"
+keywords = ["ros2", "dds", "micro-ros", "cdr", "xrce-dds"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

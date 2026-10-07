@@ -1,0 +1,19 @@
+[package]
+name = "zero-ethercat"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Industrial Real-Time EtherCAT Master engine: EtherCAT framing, ESM state machine, CoE mailbox, and Distributed Clocks (DC) for ZeroRust"
+readme = "README.md"
+keywords = ["ethercat", "real-time", "industrial-ethernet", "fieldbus", "servo"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std", "zero-bus/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+zero-bus = { path = "../zero-bus", default-features = false }

@@ -9,6 +9,11 @@ members = [
     "crates/zero-modbus",
     "crates/zero-ipc",
     "crates/zero-vision",
+    "crates/zero-ethercat",
+    "crates/zero-dynamics",
+    "crates/zero-plc",
+    "crates/zero-dds",
+    "crates/zero-tinyai",
 ]
 
 [workspace.package]

@@ -1,0 +1,20 @@
+[package]
+name = "zero-dynamics"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Robotics Dynamics & Collaborative Control: Recursive Newton-Euler (RNEA), Geometric Jacobian, Sensorless Collision Detection, and Impedance Control for ZeroRust"
+readme = "README.md"
+keywords = ["robotics", "dynamics", "rnea", "jacobian", "impedance-control"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std", "zero-motion/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+zero-motion = { path = "../zero-motion", default-features = false }
+libm = { version = "0.2", default-features = false }

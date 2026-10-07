@@ -20,10 +20,34 @@ name = "zero-core"
 version = "0.1.0"
 
 [[package]]
+name = "zero-dds"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-dsp"
 version = "0.1.0"
 dependencies = [
  "libm",
+ "zero-core",
+]
+
+[[package]]
+name = "zero-dynamics"
+version = "0.1.0"
+dependencies = [
+ "libm",
+ "zero-core",
+ "zero-motion",
+]
+
+[[package]]
+name = "zero-ethercat"
+version = "0.1.0"
+dependencies = [
+ "zero-bus",
  "zero-core",
 ]
 
@@ -54,6 +78,21 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "zero-core",
+]
+
+[[package]]
+name = "zero-plc"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
+name = "zero-tinyai"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+ "zero-dsp",
 ]
 
 [[package]]
