@@ -14,6 +14,9 @@ members = [
     "crates/zero-plc",
     "crates/zero-dds",
     "crates/zero-tinyai",
+    "crates/zero-sys",
+    "crates/zero-fastcgi",
+    "crates/zero-caddy",
 ]
 
 [workspace.package]

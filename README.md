@@ -48,7 +48,7 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 
 ---
 
-## 📦 Crates Overview (13 Crates)
+## 📦 Crates Overview (16 Crates)
 
 | Crate | Capabilities | Target Environments |
 | :--- | :--- | :--- |
@@ -65,6 +65,9 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 | **[`zero-tinyai`](crates/zero-tinyai)** | Edge Neuromorphic TinyAI: Int8 quantized forward pass, Conv1D, Anomaly Detection AutoEncoder on vibration FFT | Bearing/spindle predictive maintenance on MCU |
 | **[`zero-ipc`](crates/zero-ipc)** | Ultra-low-latency Shared Memory IPC bridge connecting ZeroRust edge controllers to ZeroPlatform (.NET) host/SCADA | Cross-process IPC, Windows FileMapping, POSIX SHM |
 | **[`zero-vision`](crates/zero-vision)** | Embedded computer vision: Otsu auto-thresholding, Sobel edge filter, Connected Component Labeling (CCL) / Blob Analysis | Industrial sorting, PCB alignment, Edge optical inspection |
+| **[`zero-sys`](crates/zero-sys)** | Sovereign Linux system telemetry (`/proc/stat`, `/proc/meminfo`, `/proc/net/dev`), Systemd service management, POSIX web root permissions | Linux Edge Gateways, Sovereign Web Hosting (ZPanl) |
+| **[`zero-fastcgi`](crates/zero-fastcgi)** | Pure Rust FastCGI v1.0 binary framing & client, zero-alloc name-value encoding, PHP-FPM worker pool configuration generator | PHP application hosting, ZPanl web engine, API gateways |
+| **[`zero-caddy`](crates/zero-caddy)** | Caddy v2 reverse proxy configuration, Caddyfile & JSON route builders (Static/SPA/PHP-FPM), Caddy Admin API (`POST /load`) client | Reverse proxy automation, dynamic SSL routing, ZPanl |
 
 ---
 
@@ -117,6 +120,22 @@ let mut gen = StepDirGenerator::new(100_000);
 gen.set_velocity(10_000, true);
 
 let (step_pin, dir_pin) = gen.tick();
+```
+
+### 4. Sovereign Web Hosting & FastCGI Framing (`zero-caddy` & `zero-fastcgi`)
+
+```rust
+use zero_caddy::{VhostBuilder, VhostDescriptor, VhostKind};
+use zero_fastcgi::FastCgiRequestBuilder;
+
+// 1. Generate declarative Caddy configuration for PHP-FPM
+let desc = VhostDescriptor::new("example.com", "/var/www/example.com", VhostKind::PhpFpm);
+let caddyfile = VhostBuilder::build_caddyfile(&desc, Some("unix//run/php/php8.2-fpm.sock"));
+
+// 2. Pure Rust zero-alloc binary FastCGI frame packing
+let mut stream_buf = [0u8; 1024];
+let mut builder = FastCgiRequestBuilder::new(1, &mut stream_buf);
+let written = builder.build_request("GET", "/index.php", &[], &[]).unwrap();
 ```
 
 ---

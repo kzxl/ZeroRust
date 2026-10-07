@@ -1,0 +1,18 @@
+[package]
+name = "zero-sys"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Native Linux system metrics (/proc zero-alloc parser), Systemd service management, and POSIX user isolation for ZPanl in ZeroRust"
+readme = "README.md"
+keywords = ["system-metrics", "procfs", "systemd", "linux", "zpanl"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

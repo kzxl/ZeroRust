@@ -1,0 +1,18 @@
+[package]
+name = "zero-fastcgi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Pure Rust FastCGI binary protocol encoding/decoding, PHP-FPM Unix socket communication, and worker pool health checking for ZPanl in ZeroRust"
+readme = "README.md"
+keywords = ["fastcgi", "php-fpm", "unix-socket", "fcgi", "zpanl"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

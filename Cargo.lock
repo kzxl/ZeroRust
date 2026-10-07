@@ -16,6 +16,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zero-caddy"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-core"
 version = "0.1.0"
 
@@ -52,6 +59,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zero-fastcgi"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-hal"
 version = "0.1.0"
 dependencies = [
@@ -82,6 +96,13 @@ dependencies = [
 
 [[package]]
 name = "zero-plc"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
+name = "zero-sys"
 version = "0.1.0"
 dependencies = [
  "zero-core",
