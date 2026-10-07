@@ -1,0 +1,18 @@
+[package]
+name = "zero-codec"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-speed tile-based screen compression, SIMD XOR diffing, YUV conversion, and bandwidth governor for ZConn in ZeroRust"
+readme = "README.md"
+keywords = ["screen-codec", "tile-compression", "remote-desktop", "yuv", "bandwidth-control"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

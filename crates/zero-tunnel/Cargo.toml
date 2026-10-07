@@ -1,0 +1,18 @@
+[package]
+name = "zero-tunnel"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Low-latency multiplexed UDP transport, RFC 8489 STUN client, NAT hole punching, and E2EE security for ZConn in ZeroRust"
+readme = "README.md"
+keywords = ["p2p", "udp-tunnel", "stun", "nat-traversal", "e2ee"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

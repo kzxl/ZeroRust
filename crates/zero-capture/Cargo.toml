@@ -1,0 +1,18 @@
+[package]
+name = "zero-capture"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cross-platform ultra-low-latency screen capture, cacheline-aligned frame buffer pools, and SIMD damage detection for ZConn in ZeroRust"
+readme = "README.md"
+keywords = ["screen-capture", "frame-buffer", "remote-desktop", "dxgi", "damage-tracking"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

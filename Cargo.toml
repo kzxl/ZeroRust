@@ -18,6 +18,11 @@ members = [
     "crates/zero-fastcgi",
     "crates/zero-caddy",
     "crates/zero-vfs",
+    "crates/zero-capture",
+    "crates/zero-codec",
+    "crates/zero-input",
+    "crates/zero-tunnel",
+    "crates/zero-zconn",
 ]
 
 [workspace.package]

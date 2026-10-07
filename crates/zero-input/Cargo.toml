@@ -1,0 +1,18 @@
+[package]
+name = "zero-input"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Synthetic input injection, USB HID scancode mappings, anti-stuck key safety guard, and clipboard sync for ZConn in ZeroRust"
+readme = "README.md"
+keywords = ["input-injection", "mouse", "keyboard", "anti-stuck", "clipboard"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

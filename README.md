@@ -48,7 +48,7 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 
 ---
 
-## 📦 Crates Overview (17 Crates)
+## 📦 Crates Overview (22 Crates)
 
 | Crate | Capabilities | Target Environments |
 | :--- | :--- | :--- |
@@ -69,6 +69,11 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 | **[`zero-fastcgi`](crates/zero-fastcgi)** | Pure Rust FastCGI v1.0 binary framing & client, zero-alloc name-value encoding, PHP-FPM worker pool configuration generator | PHP application hosting, ZPanl web engine, API gateways |
 | **[`zero-caddy`](crates/zero-caddy)** | Caddy v2 reverse proxy configuration, Caddyfile & JSON route builders (Static/SPA/PHP-FPM), Caddy Admin API (`POST /load`) client | Reverse proxy automation, dynamic SSL routing, ZPanl |
 | **[`zero-vfs`](crates/zero-vfs)** | Virtual file system security jail, path traversal prevention, atomic staging rename protocol, zero-alloc MIME engine | Sovereign Web File Manager, ZPanl storage, secure editors |
+| **[`zero-capture`](crates/zero-capture)** | Cross-platform screen acquisition, 64-byte cacheline-aligned `FrameBufferPool`, SIMD 32x32 tile damage detection | ZConn host, Remote Desktop, Display duplication |
+| **[`zero-codec`](crates/zero-codec)** | High-speed `ZeroTile` compression, SIMD XOR diffing, zero-run RLE, integer YUV444p/YUV420p, dynamic bandwidth governor | Ultra-low latency screen encoding, graphical streaming |
+| **[`zero-input`](crates/zero-input)** | Synthetic input injection, USB HID scancode maps, `SafetyGuard` anti-stuck key state machine, loop-free clipboard | Remote control, teleoperation, gaming input |
+| **[`zero-tunnel`](crates/zero-tunnel)** | Low-latency multiplexed UDP protocol (`ZProto`), RFC 8489 STUN client, NAT classifier, ChaCha20 E2EE, jitter buffer | Peer-to-peer transport, NAT traversal, mesh tunnels |
+| **[`zero-zconn`](crates/zero-zconn)** | Sovereign Remote Desktop host daemon, client engine, quality presets, and ZeroPlatform (.NET C#) C-FFI bindings | ZConn Remote Desktop, Teleoperation, HMI streaming |
 
 ---
 
@@ -137,6 +142,31 @@ let caddyfile = VhostBuilder::build_caddyfile(&desc, Some("unix//run/php/php8.2-
 let mut stream_buf = [0u8; 1024];
 let mut builder = FastCgiRequestBuilder::new(1, &mut stream_buf);
 let written = builder.build_request("GET", "/index.php", &[], &[]).unwrap();
+```
+
+### 4. Sovereign Remote Desktop Streaming (`zero-zconn`)
+
+```rust
+use zero_zconn::{ZConnHost, ZConnClient, HostConfig, ClientConfig};
+use zero_capture::MockCapturer;
+use zero_input::MockInjector;
+
+// 1. Host: initialize zero-copy capture, SIMD ZeroTile codec, and input injector
+let capturer = Box::new(MockCapturer::new(1920, 1080));
+let injector = Box::new(MockInjector::new());
+let mut host = ZConnHost::new(HostConfig::default(), capturer, injector);
+
+// 2. Client: initialize presentation surface & jitter buffer
+let mut client = ZConnClient::new(ClientConfig::default(), 1920, 1080);
+
+// 3. Process frame: encodes 32x32 tiles and outputs UDP datagrams
+let packets = host.process_frame_step(16).expect("Capture & encode frame");
+
+// 4. Ingest and render at client
+for pkt in &packets {
+    client.handle_incoming_packet(pkt);
+}
+let display_pixels = client.render_surface(); // Direct D3D11 / WPF shared texture
 ```
 
 ---

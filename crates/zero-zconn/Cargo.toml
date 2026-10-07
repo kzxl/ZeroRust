@@ -1,0 +1,22 @@
+[package]
+name = "zero-zconn"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Sovereign ultra-low-latency remote desktop host daemon, client engine, and C-FFI bindings for ZConn in ZeroRust"
+readme = "README.md"
+keywords = ["remote-desktop", "zconn", "host", "client", "ffi"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+zero-capture = { path = "../zero-capture" }
+zero-codec = { path = "../zero-codec" }
+zero-input = { path = "../zero-input" }
+zero-tunnel = { path = "../zero-tunnel" }
