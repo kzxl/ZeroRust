@@ -27,36 +27,44 @@ pub unsafe fn compute_tile_xor(
     let mut mutated_words = 0u32;
     let mut is_solid = true;
     let first_pixel = *(cur_ptr as *const u32);
+    let solid_u64 = ((first_pixel as u64) << 32) | (first_pixel as u64);
 
     for row in 0..32 {
-        let c_row = cur_ptr.add(row * stride);
-        let r_row = ref_ptr.add(row * stride);
-        let o_row = out_delta.add(row * 128); // 32 pixels * 4 = 128 bytes per row
+        let c_u64 = cur_ptr.add(row * stride) as *const u64;
+        let r_u64 = ref_ptr.add(row * stride) as *const u64;
+        let o_u64 = out_delta.add(row * 128) as *mut u64;
 
-        let c_u64 = c_row as *const u64;
-        let r_u64 = r_row as *const u64;
-        let o_u64 = o_row as *mut u64;
+        // 16 x 64-bit words per row (128 bytes) = 4 iterations of 4-wide unrolling
+        for w in (0..16).step_by(4) {
+            let c0 = *c_u64.add(w);
+            let r0 = *r_u64.add(w);
+            let x0 = c0 ^ r0;
+            *o_u64.add(w) = x0;
 
-        // 16 x 64-bit words per row = 128 bytes
-        for w in 0..16 {
-            let c_val = *c_u64.add(w);
-            let r_val = *r_u64.add(w);
-            let x_val = c_val ^ r_val;
-            *o_u64.add(w) = x_val;
+            let c1 = *c_u64.add(w + 1);
+            let r1 = *r_u64.add(w + 1);
+            let x1 = c1 ^ r1;
+            *o_u64.add(w + 1) = x1;
 
-            if x_val != 0 {
-                mutated_words += 1;
-            }
-        }
+            let c2 = *c_u64.add(w + 2);
+            let r2 = *r_u64.add(w + 2);
+            let x2 = c2 ^ r2;
+            *o_u64.add(w + 2) = x2;
 
-        // Solid color check
-        if is_solid {
-            let c_u32 = c_row as *const u32;
-            for p in 0..32 {
-                if *c_u32.add(p) != first_pixel {
-                    is_solid = false;
-                    break;
-                }
+            let c3 = *c_u64.add(w + 3);
+            let r3 = *r_u64.add(w + 3);
+            let x3 = c3 ^ r3;
+            *o_u64.add(w + 3) = x3;
+
+            // Branchless mutation accumulator (compiled to setne / cmov)
+            mutated_words +=
+                (x0 != 0) as u32 + (x1 != 0) as u32 + (x2 != 0) as u32 + (x3 != 0) as u32;
+
+            // In-flight dual-pixel solid color comparison eliminating secondary read pass
+            if is_solid
+                && ((c0 ^ solid_u64) | (c1 ^ solid_u64) | (c2 ^ solid_u64) | (c3 ^ solid_u64)) != 0
+            {
+                is_solid = false;
             }
         }
     }
@@ -81,16 +89,16 @@ pub unsafe fn apply_tile_xor(
     stride: usize,
 ) {
     for row in 0..32 {
-        let r_row = ref_ptr.add(row * stride);
-        let d_row = delta_ptr.add(row * 128);
-        let o_row = out_ptr.add(row * stride);
+        let r_u64 = ref_ptr.add(row * stride) as *const u64;
+        let d_u64 = delta_ptr.add(row * 128) as *const u64;
+        let o_u64 = out_ptr.add(row * stride) as *mut u64;
 
-        let r_u64 = r_row as *const u64;
-        let d_u64 = d_row as *const u64;
-        let o_u64 = o_row as *mut u64;
-
-        for w in 0..16 {
+        // 4-wide unrolling enables 256-bit AVX2 / 128-bit SSE auto-vectorization
+        for w in (0..16).step_by(4) {
             *o_u64.add(w) = *r_u64.add(w) ^ *d_u64.add(w);
+            *o_u64.add(w + 1) = *r_u64.add(w + 1) ^ *d_u64.add(w + 1);
+            *o_u64.add(w + 2) = *r_u64.add(w + 2) ^ *d_u64.add(w + 2);
+            *o_u64.add(w + 3) = *r_u64.add(w + 3) ^ *d_u64.add(w + 3);
         }
     }
 }

@@ -11,18 +11,19 @@ pub const TILE_SIZE: u32 = 32;
 /// Both `cur_ptr` and `ref_ptr` must point to valid memory buffers with at least `stride * 32` bytes.
 #[inline]
 pub unsafe fn is_tile_damaged(cur_ptr: *const u8, ref_ptr: *const u8, stride: usize) -> bool {
-    let row_bytes = (TILE_SIZE as usize) * 4; // 32 pixels * 4 bytes = 128 bytes per row
-
     for row in 0..(TILE_SIZE as usize) {
-        let c_row = cur_ptr.add(row * stride);
-        let r_row = ref_ptr.add(row * stride);
+        let c_row = cur_ptr.add(row * stride) as *const u64;
+        let r_row = ref_ptr.add(row * stride) as *const u64;
 
-        // Fast 64-bit comparison loop (16 u64 chunks per 128 bytes)
-        let c_u64 = c_row as *const u64;
-        let r_u64 = r_row as *const u64;
+        // 16 x 64-bit words per row (128 bytes = 2 cachelines)
+        // 4-wide unrolling combines deltas via bitwise OR, reducing branches by 75%
+        for chunk in (0..16).step_by(4) {
+            let d0 = *c_row.add(chunk) ^ *r_row.add(chunk);
+            let d1 = *c_row.add(chunk + 1) ^ *r_row.add(chunk + 1);
+            let d2 = *c_row.add(chunk + 2) ^ *r_row.add(chunk + 2);
+            let d3 = *c_row.add(chunk + 3) ^ *r_row.add(chunk + 3);
 
-        for chunk in 0..(row_bytes / 8) {
-            if *c_u64.add(chunk) != *r_u64.add(chunk) {
+            if (d0 | d1 | d2 | d3) != 0 {
                 return true;
             }
         }
@@ -51,18 +52,19 @@ impl DamageScanner {
         }
     }
 
-    /// Scans current and reference frame buffers, returning all modified tile rectangles.
-    pub fn scan_damage(
+    /// Scans current and reference frame buffers into a pre-allocated vector to avoid heap allocation.
+    pub fn scan_damage_into(
         &self,
         current_data: &[u8],
         reference_data: &[u8],
         stride: usize,
-    ) -> Vec<Rect> {
-        let mut damaged_rects = Vec::new();
+        out: &mut Vec<Rect>,
+    ) {
+        out.clear();
         if current_data.len() < stride * (self.height as usize)
             || reference_data.len() < stride * (self.height as usize)
         {
-            return damaged_rects;
+            return;
         }
 
         for ty in 0..self.tiles_y {
@@ -102,7 +104,7 @@ impl DamageScanner {
                     };
 
                     if changed {
-                        damaged_rects.push(Rect {
+                        out.push(Rect {
                             x: px,
                             y: py,
                             width: tile_w,
@@ -112,7 +114,17 @@ impl DamageScanner {
                 }
             }
         }
+    }
 
+    /// Scans current and reference frame buffers, returning all modified tile rectangles.
+    pub fn scan_damage(
+        &self,
+        current_data: &[u8],
+        reference_data: &[u8],
+        stride: usize,
+    ) -> Vec<Rect> {
+        let mut damaged_rects = Vec::with_capacity(32);
+        self.scan_damage_into(current_data, reference_data, stride, &mut damaged_rects);
         damaged_rects
     }
 
@@ -156,5 +168,11 @@ mod tests {
         let damage = scanner.scan_damage(&cur, &ref_b, stride);
         assert_eq!(damage.len(), 1);
         assert_eq!(damage[0], Rect::new(0, 0, 32, 32));
+
+        // Test zero-allocation scan_damage_into
+        let mut reusable = Vec::new();
+        scanner.scan_damage_into(&cur, &ref_b, stride, &mut reusable);
+        assert_eq!(reusable.len(), 1);
+        assert_eq!(reusable[0], Rect::new(0, 0, 32, 32));
     }
 }

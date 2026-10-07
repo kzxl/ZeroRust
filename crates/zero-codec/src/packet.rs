@@ -59,14 +59,18 @@ impl TileFragmentHeader {
 pub struct TilePacketizer;
 
 impl TilePacketizer {
-    /// Splits an encoded tile into a vector of UDP datagram fragments.
-    pub fn packetize(frame_id: u32, tile_index: u16, tile_data: &[u8]) -> Vec<Vec<u8>> {
+    /// Splits an encoded tile into fragments appended directly into an existing vector.
+    pub fn packetize_into(
+        frame_id: u32,
+        tile_index: u16,
+        tile_data: &[u8],
+        out: &mut Vec<Vec<u8>>,
+    ) {
         if tile_data.is_empty() {
-            return Vec::new();
+            return;
         }
 
         let total_chunks = tile_data.len().div_ceil(MAX_UDP_PAYLOAD_BYTES) as u8;
-        let mut packets = Vec::with_capacity(total_chunks as usize);
 
         for chunk_idx in 0..total_chunks {
             let start = (chunk_idx as usize) * MAX_UDP_PAYLOAD_BYTES;
@@ -84,9 +88,15 @@ impl TilePacketizer {
             let mut packet = Vec::with_capacity(TileFragmentHeader::SIZE + chunk_slice.len());
             packet.extend_from_slice(&header.to_bytes());
             packet.extend_from_slice(chunk_slice);
-            packets.push(packet);
+            out.push(packet);
         }
+    }
 
+    /// Splits an encoded tile into a vector of UDP datagram fragments.
+    pub fn packetize(frame_id: u32, tile_index: u16, tile_data: &[u8]) -> Vec<Vec<u8>> {
+        let total_chunks = tile_data.len().div_ceil(MAX_UDP_PAYLOAD_BYTES);
+        let mut packets = Vec::with_capacity(total_chunks);
+        Self::packetize_into(frame_id, tile_index, tile_data, &mut packets);
         packets
     }
 }

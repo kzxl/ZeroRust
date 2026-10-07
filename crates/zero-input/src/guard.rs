@@ -57,25 +57,29 @@ impl SafetyGuard {
         current_time_ms.saturating_sub(self.last_activity_ms) > self.timeout_threshold_ms
     }
 
-    /// Generates synthetic `Released` events for all currently held keys to prevent stuck keys.
-    pub fn release_all_keys(&mut self) -> Vec<KeyboardEvent> {
-        let mut release_events = Vec::new();
-
+    /// Generates synthetic `Released` events appended directly into an existing vector.
+    pub fn release_all_keys_into(&mut self, out: &mut Vec<KeyboardEvent>) {
         for idx in 0..4 {
             let mut mask = self.active_keys[idx];
             while mask != 0 {
                 let bit = mask.trailing_zeros();
                 let scancode = (idx * 64 + bit as usize) as u8;
-                release_events.push(KeyboardEvent {
+                out.push(KeyboardEvent {
                     scancode,
                     state: ElementState::Released,
                     modifiers: 0,
                 });
-                mask &= !(1 << bit);
+                // Clear lowest set bit using BLSR instruction idiom
+                mask &= mask - 1;
             }
             self.active_keys[idx] = 0;
         }
+    }
 
+    /// Generates synthetic `Released` events for all currently held keys to prevent stuck keys.
+    pub fn release_all_keys(&mut self) -> Vec<KeyboardEvent> {
+        let mut release_events = Vec::new();
+        self.release_all_keys_into(&mut release_events);
         release_events
     }
 

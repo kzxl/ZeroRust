@@ -13,6 +13,16 @@ pub fn compress_tile_rle(input: &[u8], output: &mut Vec<u8>) {
         // Check for run of zeroes
         if input[i] == 0 {
             let start = i;
+            // Fast 8-byte word skip for dense zero runs
+            while i + 8 <= len && (i - start) + 8 <= 128 {
+                let chunk = u64::from_ne_bytes(input[i..i + 8].try_into().unwrap());
+                if chunk == 0 {
+                    i += 8;
+                } else {
+                    break;
+                }
+            }
+            // Trailing byte-level check
             while i < len && input[i] == 0 && (i - start) < 128 {
                 i += 1;
             }

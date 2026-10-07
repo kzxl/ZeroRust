@@ -92,7 +92,8 @@ impl FrameJitterBuffer {
         // Check if all chunks have arrived
         let received_count = entry.iter().filter(|c| c.is_some()).count();
         if received_count == entry.len() {
-            let mut complete_payload = Vec::new();
+            let total_capacity: usize = entry.iter().flatten().map(|c| c.len()).sum();
+            let mut complete_payload = Vec::with_capacity(total_capacity);
             for c in entry.drain(..).flatten() {
                 complete_payload.extend_from_slice(&c);
             }

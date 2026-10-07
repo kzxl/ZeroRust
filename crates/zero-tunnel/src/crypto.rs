@@ -85,8 +85,21 @@ pub fn chacha20_xor(key: &[u8; 32], counter: u32, nonce: &[u8; 12], data: &mut [
         chacha20_block(key, curr_counter, nonce, &mut block);
         let chunk_len = (data.len() - offset).min(64);
 
-        for i in 0..chunk_len {
-            data[offset + i] ^= block[i];
+        let target = &mut data[offset..offset + chunk_len];
+        let (chunks, rem) = target.split_at_mut(chunk_len & !7);
+        let (d_chunks, _) = chunks.as_chunks_mut::<8>();
+        let (b_chunks, _) = block.as_chunks::<8>();
+
+        // 8-byte unrolled XOR using 64-bit words
+        for (d_chunk, b_chunk) in d_chunks.iter_mut().zip(b_chunks.iter()) {
+            let d = u64::from_ne_bytes(*d_chunk);
+            let b = u64::from_ne_bytes(*b_chunk);
+            *d_chunk = (d ^ b).to_ne_bytes();
+        }
+
+        // Remainder bytes
+        for (d, b) in rem.iter_mut().zip(&block[chunks.len()..]) {
+            *d ^= *b;
         }
 
         offset += chunk_len;

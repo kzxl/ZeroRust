@@ -15,10 +15,17 @@ pub fn bgra_to_yuv444p(
     assert!(u_plane.len() >= total_pixels);
     assert!(v_plane.len() >= total_pixels);
 
-    for i in 0..total_pixels {
-        let b = bgra[i * 4] as i32;
-        let g = bgra[i * 4 + 1] as i32;
-        let r = bgra[i * 4 + 2] as i32;
+    let (bgra_chunks, _) = bgra[..total_pixels * 4].as_chunks::<4>();
+    for (chunk, (y_out, (u_out, v_out))) in bgra_chunks.iter().zip(
+        y_plane[..total_pixels].iter_mut().zip(
+            u_plane[..total_pixels]
+                .iter_mut()
+                .zip(v_plane[..total_pixels].iter_mut()),
+        ),
+    ) {
+        let b = chunk[0] as i32;
+        let g = chunk[1] as i32;
+        let r = chunk[2] as i32;
 
         // ITU-R BT.601 integer fixed-point matrix:
         // Y = (66*R + 129*G + 25*B + 128) >> 8 + 16
@@ -28,9 +35,9 @@ pub fn bgra_to_yuv444p(
         let u = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
         let v = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
 
-        y_plane[i] = y.clamp(0, 255) as u8;
-        u_plane[i] = u.clamp(0, 255) as u8;
-        v_plane[i] = v.clamp(0, 255) as u8;
+        *y_out = y.clamp(0, 255) as u8;
+        *u_out = u.clamp(0, 255) as u8;
+        *v_out = v.clamp(0, 255) as u8;
     }
 }
 
@@ -49,19 +56,26 @@ pub fn yuv444p_to_bgra(
     assert!(u_plane.len() >= total_pixels);
     assert!(v_plane.len() >= total_pixels);
 
-    for i in 0..total_pixels {
-        let c = y_plane[i] as i32 - 16;
-        let d = u_plane[i] as i32 - 128;
-        let e = v_plane[i] as i32 - 128;
+    let (bgra_chunks_mut, _) = bgra[..total_pixels * 4].as_chunks_mut::<4>();
+    for (chunk, (&y, (&u, &v))) in bgra_chunks_mut.iter_mut().zip(
+        y_plane[..total_pixels].iter().zip(
+            u_plane[..total_pixels]
+                .iter()
+                .zip(v_plane[..total_pixels].iter()),
+        ),
+    ) {
+        let c = y as i32 - 16;
+        let d = u as i32 - 128;
+        let e = v as i32 - 128;
 
         let r = (298 * c + 409 * e + 128) >> 8;
         let g = (298 * c - 100 * d - 208 * e + 128) >> 8;
         let b = (298 * c + 516 * d + 128) >> 8;
 
-        bgra[i * 4] = b.clamp(0, 255) as u8;
-        bgra[i * 4 + 1] = g.clamp(0, 255) as u8;
-        bgra[i * 4 + 2] = r.clamp(0, 255) as u8;
-        bgra[i * 4 + 3] = 0xFF; // Full opacity
+        chunk[0] = b.clamp(0, 255) as u8;
+        chunk[1] = g.clamp(0, 255) as u8;
+        chunk[2] = r.clamp(0, 255) as u8;
+        chunk[3] = 0xFF; // Full opacity
     }
 }
 

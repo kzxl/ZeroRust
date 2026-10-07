@@ -25,6 +25,7 @@ pub struct ZConnClient {
     metrics: SessionMetrics,
     input_sequence: u32,
     last_rendered_frame: u32,
+    decode_delta_scratch: [u8; TILE_RAW_BYTES],
 }
 
 impl ZConnClient {
@@ -47,6 +48,7 @@ impl ZConnClient {
             metrics: SessionMetrics::default(),
             input_sequence: 0,
             last_rendered_frame: 0,
+            decode_delta_scratch: [0u8; TILE_RAW_BYTES],
         }
     }
 
@@ -100,22 +102,32 @@ impl ZConnClient {
             match kind {
                 TileKind::SolidColor => {
                     if payload.len() >= 4 {
-                        let color_bytes = [payload[0], payload[1], payload[2], payload[3]];
+                        let color_u32 =
+                            u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                        let color_u64 = ((color_u32 as u64) << 32) | (color_u32 as u64);
                         for row in 0..32 {
                             let row_start = byte_offset + row * self.stride;
-                            for col in 0..32 {
-                                let p = row_start + col * 4;
-                                self.render_surface[p..p + 4].copy_from_slice(&color_bytes);
+                            let o_u64 = unsafe {
+                                self.render_surface.as_mut_ptr().add(row_start) as *mut u64
+                            };
+                            for w in 0..16 {
+                                unsafe {
+                                    *o_u64.add(w) = color_u64;
+                                }
                             }
                         }
                     }
                 }
                 TileKind::DeltaRle | TileKind::FullIntra => {
-                    let mut delta = vec![0u8; TILE_RAW_BYTES];
-                    if decompress_tile_rle(payload, &mut delta).is_ok() {
+                    if decompress_tile_rle(payload, &mut self.decode_delta_scratch).is_ok() {
                         unsafe {
                             let out_ptr = self.render_surface.as_mut_ptr().add(byte_offset);
-                            apply_tile_xor(out_ptr, delta.as_ptr(), out_ptr, self.stride);
+                            apply_tile_xor(
+                                out_ptr,
+                                self.decode_delta_scratch.as_ptr(),
+                                out_ptr,
+                                self.stride,
+                            );
                         }
                     }
                 }

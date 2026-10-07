@@ -28,6 +28,9 @@ pub struct ZConnHost {
     metrics: SessionMetrics,
     frame_sequence: u32,
     client_addr: Option<SocketAddr>,
+    delta_scratch: [u8; TILE_RAW_BYTES],
+    rle_scratch: Vec<u8>,
+    tile_packet_scratch: Vec<u8>,
 }
 
 impl ZConnHost {
@@ -61,6 +64,9 @@ impl ZConnHost {
             metrics: SessionMetrics::default(),
             frame_sequence: 0,
             client_addr: None,
+            delta_scratch: [0u8; TILE_RAW_BYTES],
+            rle_scratch: Vec::with_capacity(TILE_RAW_BYTES),
+            tile_packet_scratch: Vec::with_capacity(TILE_RAW_BYTES + 64),
         }
     }
 
@@ -91,9 +97,7 @@ impl ZConnHost {
         let h = captured.buffer.height;
         let cur_slice = captured.buffer.as_slice();
 
-        let mut outgoing_packets = Vec::new();
-        let mut delta_scratch = vec![0u8; TILE_RAW_BYTES];
-        let mut rle_scratch = Vec::with_capacity(TILE_RAW_BYTES);
+        let mut outgoing_packets = Vec::with_capacity(32);
 
         let tiles_x = w.div_ceil(TILE_SIZE);
         let tiles_y = h.div_ceil(TILE_SIZE);
@@ -116,25 +120,22 @@ impl ZConnHost {
                     let ref_ptr = self.prev_frame.as_ptr().add(byte_offset);
 
                     let analysis =
-                        compute_tile_xor(cur_ptr, ref_ptr, delta_scratch.as_mut_ptr(), stride);
+                        compute_tile_xor(cur_ptr, ref_ptr, self.delta_scratch.as_mut_ptr(), stride);
 
                     if !is_intra && analysis.is_identical {
                         continue; // 0-byte unchanged tile: completely skipped!
                     }
 
-                    rle_scratch.clear();
+                    self.rle_scratch.clear();
 
-                    let (kind, payload_slice) = if analysis.is_solid {
-                        (
-                            TileKind::SolidColor,
-                            &analysis.solid_color.to_le_bytes()[..],
-                        )
+                    let (kind, payload_len) = if analysis.is_solid {
+                        (TileKind::SolidColor, 4)
                     } else if is_intra {
-                        compress_tile_rle(&delta_scratch, &mut rle_scratch);
-                        (TileKind::FullIntra, rle_scratch.as_slice())
+                        compress_tile_rle(&self.delta_scratch, &mut self.rle_scratch);
+                        (TileKind::FullIntra, self.rle_scratch.len())
                     } else {
-                        compress_tile_rle(&delta_scratch, &mut rle_scratch);
-                        (TileKind::DeltaRle, rle_scratch.as_slice())
+                        compress_tile_rle(&self.delta_scratch, &mut self.rle_scratch);
+                        (TileKind::DeltaRle, self.rle_scratch.len())
                     };
 
                     let header = TileHeader {
@@ -142,17 +143,26 @@ impl ZConnHost {
                         tile_y: ty as u16,
                         kind: kind as u8,
                         flags: if is_intra { 0x01 } else { 0x00 },
-                        payload_len: payload_slice.len() as u16,
+                        payload_len: payload_len as u16,
                     };
 
-                    let mut tile_packet_data =
-                        Vec::with_capacity(TileHeader::SIZE + payload_slice.len());
-                    tile_packet_data.extend_from_slice(&header.to_bytes());
-                    tile_packet_data.extend_from_slice(payload_slice);
+                    self.tile_packet_scratch.clear();
+                    self.tile_packet_scratch
+                        .extend_from_slice(&header.to_bytes());
+                    if kind == TileKind::SolidColor {
+                        self.tile_packet_scratch
+                            .extend_from_slice(&analysis.solid_color.to_le_bytes());
+                    } else {
+                        self.tile_packet_scratch
+                            .extend_from_slice(&self.rle_scratch);
+                    }
 
                     // Fragment into MTU 1160 datagrams
-                    let frags =
-                        TilePacketizer::packetize(frame_id, tile_idx as u16, &tile_packet_data);
+                    let frags = TilePacketizer::packetize(
+                        frame_id,
+                        tile_idx as u16,
+                        &self.tile_packet_scratch,
+                    );
                     for frag_data in frags {
                         let pkt = ZProtoPacket::new(
                             ZProtoChannel::Video,
