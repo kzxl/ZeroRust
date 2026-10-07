@@ -18,7 +18,7 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
                        │               ZeroPlatform (.NET 8/9/10)               │
                        │   Desktop HMI • SCADA • Distributed Cloud • Vision     │
                        └───────────────────────────▲────────────────────────────┘
-                                                   │ IPC / ZeroMQ / gRPC
+                                                   │ zero-ipc (Shared Memory Ring Buffer)
                                                    ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                       ZeroRust (`zero-rs`)                                     │
@@ -34,12 +34,16 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 │ • 4x Quadrature Decoder       │ • Moving Average (Const-size)  │ • Modbus TCP (MBAP Header)    │
 │ • Step/Dir DDA Pulse Train    │ • 1D Optimal Kalman Filter     │ • Tableless & Fast CRC16      │
 │ • Hardware Mock Abstractions  │ • Radix-2 FFT Vibration Peak   │ • Zero-alloc PDU Serialization│
-└───────────────────────────────┴────────────────────────────────┴───────────────────────────────┘
+├───────────────────────────────┴────────────────────────────────┴───────────────────────────────┤
+│                                  zero-ipc & zero-vision                                        │
+│ • zero-ipc: 64-byte aligned lock-free Shared Memory Ring Buffer compatible with C# .NET        │
+│ • zero-vision: #![no_std] Otsu binarization, Sobel edge detector, Connected Component Blobs    │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 📦 Crates Overview
+## 📦 Crates Overview (8 Crates)
 
 | Crate | Capabilities | Target Environments |
 | :--- | :--- | :--- |
@@ -49,37 +53,48 @@ Where **ZeroPlatform (.NET)** governs Desktop HMI, Distributed SCADA, High-Level
 | **[`zero-hal`](crates/zero-hal)** | Hardware abstraction layer: Digital I/O debouncing, 4x Quadrature Encoder decoding with Index Z latching, Step/Dir DDA pulse generator | Stepper/Servo drives, Optical Encoders, Endstop sensors |
 | **[`zero-dsp`](crates/zero-dsp)** | Real-time signal processing: Butterworth Low-Pass filter, Moving Average, 1D Kalman sensor fusion, Radix-2 FFT vibration spectrum analysis | Load cells, Pressure sensors, Bearing vibration analysis |
 | **[`zero-modbus`](crates/zero-modbus)** | Industrial Modbus RTU (RS485) & Modbus TCP engine, zero-allocation PDU parsing, CRC16 checksum computation | PLCs, Remote I/O racks, Inverters, Energy meters |
+| **[`zero-ipc`](crates/zero-ipc)** | Ultra-low-latency Shared Memory IPC bridge connecting ZeroRust edge controllers to ZeroPlatform (.NET) host/SCADA | Cross-process IPC, Windows FileMapping, POSIX SHM |
+| **[`zero-vision`](crates/zero-vision)** | Embedded computer vision: Otsu auto-thresholding, Sobel edge filter, Connected Component Labeling (CCL) / Blob Analysis | Industrial sorting, PCB alignment, Edge optical inspection |
 
 ---
 
 ## 🚀 Quick Start Examples
 
-### 1. Lock-free SPSC Ring Buffer (`zero-core`)
+### 1. Lock-free Shared Memory IPC Bridge (`zero-ipc`)
 
 ```rust
-use zero_core::ring_buffer::SpscRingBuffer;
+use zero_ipc::{ShmRingBuffer, MotionCommandPayload};
 
-static QUEUE: SpscRingBuffer<u32, 64> = SpscRingBuffer::new();
+let mut shm_memory = [0u8; 4096];
+let mut ring = ShmRingBuffer::init_new(&mut shm_memory, 16, 64).expect("SHM initialized");
 
-fn main() {
-    assert!(QUEUE.push(42).is_ok());
-    assert_eq!(QUEUE.pop(), Some(42));
-}
+let cmd = MotionCommandPayload {
+    timestamp_ns: 1_000_000,
+    command_type: 1, // Position mode
+    target_positions: [1000, 2000, 3000, 0, 0, 0],
+    target_velocities: [100, 200, 300, 0, 0, 0],
+    controlword: 0x000F,
+    reserved: 0,
+};
+
+ring.push(&cmd).expect("Command pushed to shared memory");
 ```
 
-### 2. CANopen CiA 402 Servo Drive State Machine (`zero-bus`)
+### 2. Embedded Vision Blob Extraction (`zero-vision`)
 
 ```rust
-use zero_bus::cia402::{Cia402Drive, ControlWord, DriveState, OperationMode};
+use zero_vision::{ImageBuffer, Blob, BlobAnalyzer, otsu_threshold, binarize};
 
-let mut drive = Cia402Drive::new(1); // Node ID 1
-drive.set_target_mode(OperationMode::CyclicSynchronousPosition);
+let img: ImageBuffer<4096> = ImageBuffer::new(64, 64);
+let th = otsu_threshold(&img);
 
-drive.process_controlword(ControlWord::SHUTDOWN);
-drive.process_controlword(ControlWord::SWITCH_ON);
-drive.process_controlword(ControlWord::ENABLE_OPERATION);
+let mut binary = ImageBuffer::new(64, 64);
+binarize(&img, &mut binary, th, false);
 
-assert_eq!(drive.current_state(), DriveState::OperationEnabled);
+let mut scratch = [0u16; 4096];
+let mut blobs = [Blob::default(); 16];
+let count = BlobAnalyzer::analyze(&binary, &mut scratch, &mut blobs);
+println!("Detected {} foreground blobs on production line", count);
 ```
 
 ### 3. Step/Dir DDA Pulse Generator (`zero-hal`)
@@ -91,33 +106,7 @@ use zero_hal::stepdir::StepDirGenerator;
 let mut gen = StepDirGenerator::new(100_000);
 gen.set_velocity(10_000, true);
 
-// Execute in real-time timer interrupt (10us cycle)
 let (step_pin, dir_pin) = gen.tick();
-```
-
-### 4. Vibration Spectrum Analysis with Radix-2 FFT (`zero-dsp`)
-
-```rust
-use zero_dsp::fft::{Complex64, Radix2Fft};
-
-let mut signal = [Complex64::default(); 256];
-// ... fill signal with vibration accelerometer data ...
-Radix2Fft::transform(&mut signal).expect("FFT transformed");
-
-let mut magnitudes = [0.0; 128];
-Radix2Fft::compute_magnitudes(&signal, &mut magnitudes).unwrap();
-let dominant_frequency_bin = Radix2Fft::find_peak_bin(&magnitudes);
-```
-
-### 5. Modbus RTU Frame Parsing (`zero-modbus`)
-
-```rust
-use zero_modbus::rtu::ModbusRtu;
-
-let frame = [0x01, 0x03, 0x00, 0x02, 0x00, 0x04, 0xE5, 0xC9];
-if let Ok((slave, req)) = ModbusRtu::parse_frame(&frame) {
-    println!("Slave: {}, Request: {:?}", slave, req);
-}
 ```
 
 ---

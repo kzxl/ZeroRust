@@ -7,6 +7,8 @@ members = [
     "crates/zero-hal",
     "crates/zero-dsp",
     "crates/zero-modbus",
+    "crates/zero-ipc",
+    "crates/zero-vision",
 ]
 
 [workspace.package]

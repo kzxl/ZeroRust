@@ -1,0 +1,19 @@
+[package]
+name = "zero-vision"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lightweight embedded computer vision suite for ZeroRust: Otsu thresholding, Sobel edge filter, Connected Component Labeling, and fiducial pattern finding"
+readme = "README.md"
+keywords = ["computer-vision", "image-processing", "edge-detection", "blob", "no-std"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+libm = { version = "0.2", default-features = false }

@@ -1,0 +1,18 @@
+[package]
+name = "zero-ipc"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Ultra-low-latency, zero-copy shared memory IPC bridge connecting ZeroRust edge controllers to ZeroPlatform (.NET) SCADA"
+readme = "README.md"
+keywords = ["ipc", "shared-memory", "ring-buffer", "zero-copy", "real-time"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
