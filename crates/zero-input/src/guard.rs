@@ -59,8 +59,8 @@ impl SafetyGuard {
 
     /// Generates synthetic `Released` events appended directly into an existing vector.
     pub fn release_all_keys_into(&mut self, out: &mut Vec<KeyboardEvent>) {
-        for idx in 0..4 {
-            let mut mask = self.active_keys[idx];
+        for (idx, slot) in self.active_keys.iter_mut().enumerate() {
+            let mut mask = *slot;
             while mask != 0 {
                 let bit = mask.trailing_zeros();
                 let scancode = (idx * 64 + bit as usize) as u8;
@@ -72,7 +72,7 @@ impl SafetyGuard {
                 // Clear lowest set bit using BLSR instruction idiom
                 mask &= mask - 1;
             }
-            self.active_keys[idx] = 0;
+            *slot = 0;
         }
     }
 
