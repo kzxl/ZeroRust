@@ -207,4 +207,107 @@ mod tests {
         assert!(locked, "Fast-AF must achieve lock when peak is in reverse direction");
         assert_eq!(af.current_pos, -6, "Must park at peak pos (-6)");
     }
+
+    #[test]
+    fn test_fast_af_fine_tune_neither() {
+        // True peak is at +6 (even number). Stride is 2.
+        // Visited coarse: 1, 3, 5, 7, 9. Peak was sampled at 7 (or 5).
+        // Let's test a curve strictly peaked at +6:
+        let mut af = FastAfController::new();
+        af.reset(2, 40);
+
+        let sim_q = |pos: i32| -> u32 {
+            let dist = (pos - 6).abs();
+            (12_000 - (dist * 1_000)).max(500) as u32
+        };
+
+        let mut locked = false;
+        for _ in 0..30 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_LOCK_SUCCESS {
+                locked = true;
+                break;
+            }
+        }
+
+        assert!(locked, "Must lock onto peak at +6");
+        assert_eq!(af.current_pos, 6, "Must park accurately at +6 via fine-tune");
+        assert_eq!(af.commanded_step, 0, "No pending motor step on lock");
+    }
+
+    #[test]
+    fn test_fast_af_direction_inversion_plunge() {
+        // Suppose the probe step (+1) had tiny noise difference, so it entered CoarseClimb forward.
+        // But the real peak is far in the reverse direction at -12!
+        let mut af = FastAfController::new();
+        af.reset(2, 40);
+
+        let sim_q = |pos: i32| -> u32 {
+            // Peak at -12
+            let dist = (pos - (-12)).abs();
+            (15_000 - (dist * 400)).max(500) as u32
+        };
+
+        let mut locked = false;
+        for _ in 0..35 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_LOCK_SUCCESS {
+                locked = true;
+                break;
+            }
+        }
+
+        assert!(locked, "Must recover from wrong initial direction via inversion and lock");
+        assert_eq!(af.current_pos, -12, "Must park at true peak (-12)");
+    }
+
+    #[test]
+    fn test_fast_af_stride_1_precision() {
+        let mut af = FastAfController::new();
+        af.reset(1, 40); // Stride = 1
+
+        let sim_q = |pos: i32| -> u32 {
+            let dist = (pos - 4).abs();
+            (9_000 - (dist * 700)).max(500) as u32
+        };
+
+        let mut locked = false;
+        for _ in 0..30 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_LOCK_SUCCESS {
+                locked = true;
+                break;
+            }
+        }
+
+        assert!(locked, "Stride 1 must achieve lock");
+        assert_eq!(af.current_pos, 4, "Must park at peak (+4)");
+    }
+
+    #[test]
+    fn test_fast_af_step_bound_safety() {
+        let mut af = FastAfController::new();
+        af.reset(2, 20); // Strict limit: 20 steps
+
+        // Infinite upward ramp (no crest ever)
+        let sim_q = |pos: i32| -> u32 {
+            (1_000 + pos * 50) as u32
+        };
+
+        let mut aborted = false;
+        for _ in 0..30 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_ABORT_TIMEOUT {
+                aborted = true;
+                break;
+            }
+        }
+
+        assert!(aborted, "Must abort with timeout when max_steps is exceeded");
+        assert!(af.total_motor_steps >= 20);
+    }
 }

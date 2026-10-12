@@ -26,7 +26,8 @@ pub const FAST_AF_PHASE_COARSE_CLIMB: i32 = 4;
 pub const FAST_AF_PHASE_FINE_RETURN: i32 = 5;
 pub const FAST_AF_PHASE_FINE_TUNE_POS: i32 = 6;
 pub const FAST_AF_PHASE_FINE_TUNE_NEG: i32 = 7;
-pub const FAST_AF_PHASE_DONE: i32 = 8;
+pub const FAST_AF_PHASE_FINAL_PARK: i32 = 8;
+pub const FAST_AF_PHASE_DONE: i32 = 9;
 
 /// Minimum contrast floor to prevent hunting on featureless surfaces (white wall/lens cap).
 pub const MIN_AF_CONTRAST_FLOOR: u32 = 100;
@@ -186,13 +187,7 @@ impl FastAfController {
                         self.inverted_once = true;
                         self.direction = -self.direction;
                         self.fall_count = 0;
-
-                        // Return to 0 and step coarse in inverted direction
-                        let return_step = -self.current_pos + (self.stride * self.direction);
-                        self.current_pos += return_step;
-                        self.total_motor_steps += return_step.unsigned_abs() as i32;
-                        self.commanded_step = return_step.clamp(-3, 3);
-                        return FAST_AF_ACT_STEP_MOTOR;
+                        return self.command_coarse_step();
                     }
 
                     // Crest criteria: 2 consecutive drops OR contrast dropped below 85% of peak
@@ -220,6 +215,7 @@ impl FastAfController {
                         FAST_AF_ACT_STEP_MOTOR
                     } else {
                         self.phase = FAST_AF_PHASE_DONE;
+                        self.commanded_step = 0;
                         FAST_AF_ACT_LOCK_SUCCESS
                     }
                 } else {
@@ -232,6 +228,7 @@ impl FastAfController {
                     // +1 is a sharper peak! Park here.
                     self.peak_q = q_current;
                     self.peak_pos = self.current_pos;
+                    self.commanded_step = 0;
                     self.phase = FAST_AF_PHASE_DONE;
                     FAST_AF_ACT_LOCK_SUCCESS
                 } else {
@@ -249,16 +246,25 @@ impl FastAfController {
                     // -1 is a sharper peak! Park here.
                     self.peak_q = q_current;
                     self.peak_pos = self.current_pos;
+                    self.commanded_step = 0;
                     self.phase = FAST_AF_PHASE_DONE;
                     FAST_AF_ACT_LOCK_SUCCESS
                 } else {
-                    // Neither was better; return +1 to original coarse peak
+                    // Neither +1 nor -1 was better than coarse peak.
+                    // Step +1 back to original coarse peak and transition to FINAL_PARK.
                     self.commanded_step = 1;
                     self.current_pos += 1;
                     self.total_motor_steps += 1;
-                    self.phase = FAST_AF_PHASE_DONE;
-                    FAST_AF_ACT_LOCK_SUCCESS
+                    self.phase = FAST_AF_PHASE_FINAL_PARK;
+                    FAST_AF_ACT_STEP_MOTOR
                 }
+            }
+
+            FAST_AF_PHASE_FINAL_PARK => {
+                // Motor has now physically arrived back at peak_pos!
+                self.commanded_step = 0;
+                self.phase = FAST_AF_PHASE_DONE;
+                FAST_AF_ACT_LOCK_SUCCESS
             }
 
             _ => FAST_AF_ACT_WAIT_FRAME,
