@@ -9,14 +9,34 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
+#[cfg(not(feature = "std"))]
+#[no_mangle]
+pub unsafe extern "C" fn memset(dest: *mut core::ffi::c_void, c: i32, n: usize) -> *mut core::ffi::c_void {
+    let d = dest as *mut u8;
+    let mut i = 0;
+    while i < n {
+        core::ptr::write_volatile(d.add(i), c as u8);
+        i += 1;
+    }
+    dest
+}
+
 pub mod bw_filter;
 pub mod exposure;
+pub mod fast_af;
 pub mod film_sim;
 pub mod row_filter;
 pub mod split_focus;
 
 pub use bw_filter::{apply_bw_filter_luma, BwFilter};
 pub use exposure::{zero_photo_calc_nd_exposure, NdFilter, RawHistogram, HIST_BINS};
+pub use fast_af::{
+    rust_fast_af_eval_box, rust_fast_af_get_metrics, rust_fast_af_reset, rust_fast_af_step,
+    FastAfController, FAST_AF_ACT_ABORT_LOW_CONTRAST, FAST_AF_ACT_ABORT_TIMEOUT,
+    FAST_AF_ACT_LOCK_SUCCESS, FAST_AF_ACT_STEP_MOTOR, FAST_AF_ACT_WAIT_FRAME,
+    FAST_AF_PHASE_COARSE_CLIMB, FAST_AF_PHASE_DONE, FAST_AF_PHASE_FINE_RETURN,
+    FAST_AF_PHASE_IDLE, FAST_AF_PHASE_PROBE_INIT,
+};
 pub use film_sim::{zero_film_sim_process_yuv422, FilmProfile, FilmStock};
 pub use row_filter::{div_u32, rust_flt_get_crop_bounds, rust_flt_process_row};
 pub use split_focus::{rust_split_get_circle_dx, rust_split_update_state, SplitFocusState, SPLIT_RETICLE_RADIUS};
@@ -112,5 +132,79 @@ mod tests {
         assert_eq!(rust_split_get_circle_dx(0), 56);
         assert_eq!(rust_split_get_circle_dx(56), 0);
         assert_eq!(rust_split_get_circle_dx(60), 0); // Out of bounds safe
+    }
+
+    #[test]
+    fn test_fast_af_low_contrast() {
+        let mut af = FastAfController::new();
+        af.reset(2, 40);
+        // Extremely low contrast (lens cap) -> must abort early
+        let act = af.step(50);
+        assert_eq!(act, FAST_AF_ACT_ABORT_LOW_CONTRAST);
+    }
+
+    #[test]
+    fn test_fast_af_hill_climbing_success() {
+        let mut af = FastAfController::new();
+        af.reset(2, 40);
+
+        // Simulated focus curve: peak at motor position +8 with Q=10_000
+        let sim_q = |pos: i32| -> u32 {
+            let dist = (pos - 8).abs();
+            (10_000 - (dist * 600)).max(500) as u32
+        };
+
+        // Initial frame: pos = 0
+        let act0 = af.step(sim_q(0));
+        assert_eq!(act0, FAST_AF_ACT_STEP_MOTOR);
+        assert_eq!(af.commanded_step, 1); // Probe +1
+
+        // Loop through hill climbing
+        let mut locked = false;
+        for _ in 0..25 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_LOCK_SUCCESS {
+                locked = true;
+                break;
+            }
+            assert_eq!(act, FAST_AF_ACT_STEP_MOTOR);
+        }
+
+        assert!(locked, "Fast-AF must achieve lock on focus peak");
+        // Peak pos was 8; current pos should have returned to peak
+        assert_eq!(af.current_pos, 8, "Must park motor at peak focus position (+8)");
+        assert_eq!(af.peak_q, 10_000);
+        assert_eq!(af.get_confidence(sim_q(af.current_pos)), 100);
+    }
+
+    #[test]
+    fn test_fast_af_reverse_climbing() {
+        let mut af = FastAfController::new();
+        af.reset(2, 40);
+
+        // Simulated focus curve: peak at motor position -6
+        let sim_q = |pos: i32| -> u32 {
+            let dist = (pos - (-6)).abs();
+            (8_000 - (dist * 500)).max(500) as u32
+        };
+
+        // Probe +1: Q decreases -> should reverse to -1
+        let act0 = af.step(sim_q(0));
+        assert_eq!(act0, FAST_AF_ACT_STEP_MOTOR);
+
+        let mut locked = false;
+        for _ in 0..25 {
+            let q = sim_q(af.current_pos);
+            let act = af.step(q);
+            if act == FAST_AF_ACT_LOCK_SUCCESS {
+                locked = true;
+                break;
+            }
+            assert_eq!(act, FAST_AF_ACT_STEP_MOTOR);
+        }
+
+        assert!(locked, "Fast-AF must achieve lock when peak is in reverse direction");
+        assert_eq!(af.current_pos, -6, "Must park at peak pos (-6)");
     }
 }
