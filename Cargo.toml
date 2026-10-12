@@ -24,6 +24,8 @@ members = [
     "crates/zero-tunnel",
     "crates/zero-zconn",
     "crates/zero-tensor",
+    "crates/zero-photo",
+    "crates/zero-d4",
 ]
 
 [workspace.package]

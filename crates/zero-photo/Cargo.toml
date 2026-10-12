@@ -1,0 +1,21 @@
+[package]
+name = "zero-photo"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Computational photography, film simulations, tone curves, and real-time visual row filters for ZeroRust"
+readme = "README.md"
+keywords = ["photography", "film-simulation", "lut", "tone-curve", "color-science"]
+categories.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }

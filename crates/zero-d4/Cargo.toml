@@ -1,0 +1,19 @@
+[package]
+name = "zero-d4"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hardware Abstraction Layer (HAL) and raw DryOS RTOS bindings for Canon DIGIC 4 / 5D Mark II in ZeroRust"
+readme = "README.md"
+keywords = ["hal", "digic4", "dryos", "canon", "no-std"]
+categories.workspace = true
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+zero-core = { path = "../zero-core", default-features = false }
+critical-section = { version = "1.2", default-features = false, features = ["restore-state-u32"], optional = true }
