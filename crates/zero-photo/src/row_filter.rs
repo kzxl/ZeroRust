@@ -7,6 +7,8 @@
 //! - Computational Film Recipe adjustments (highlight/shadow curves, WB shift, grain)
 //! - Embedded libcall-free division for ARM cores lacking hardware divide instructions.
 
+use crate::bw_filter::{apply_bw_filter_luma, BwFilter};
+
 /// Restoring shift-subtract division (no libcall).
 ///
 /// On ARM cores without a hardware divider (like ARM946E-S / DIGIC 4), `/` lowers to a `BL __aeabi_uidiv`
@@ -46,6 +48,8 @@ fn clamp_u8(val: i32) -> u8 {
 #[inline(always)]
 fn apply_film_stock(
     preset: u32,
+    bw_filter: u32,
+    halation: u32,
     mut y0: u8,
     mut y1: u8,
     mut u: u8,
@@ -59,7 +63,6 @@ fn apply_film_stock(
 
             let u_diff = u as i32 - 128;
             let v_diff = v as i32 - 128;
-            // 92% -> (diff * 235) >> 8; 112% -> (diff * 287) >> 8
             u = clamp_u8(128 + ((u_diff * 235) >> 8));
             v = clamp_u8(128 + ((v_diff * 287) >> 8));
         }
@@ -80,32 +83,34 @@ fn apply_film_stock(
 
             let u_diff = u as i32 - 128;
             let v_diff = v as i32 - 128;
-            // 140% -> (diff * 358) >> 8; 135% -> (diff * 346) >> 8
             u = clamp_u8(128 + ((u_diff * 358) >> 8));
             v = clamp_u8(128 + ((v_diff * 346) >> 8));
         }
 
-        // Cinestill 800T: Tungsten cool shadows, warm red halation on highlights
+        // Cinestill 800T: Tungsten cool shadows, warm amber core and red halation bloom
         3 => {
             let u_diff = u as i32 - 128;
             let v_diff = v as i32 - 128;
-            // 125% -> (diff * 320) >> 8; 90% -> (diff * 230) >> 8
             u = clamp_u8(128 + ((u_diff * 320) >> 8));
             v = clamp_u8(128 + ((v_diff * 230) >> 8));
 
-            // Red halation glow on highlights
-            if y0 > 185 {
-                let glow = (y0 as i32 - 185) >> 2;
+            let thresh = if halation == 2 { 170 } else { 185 };
+            let mult = if halation == 2 { 3 } else { 1 };
+            let max_y = (y0 as i32).max(y1 as i32);
+            if max_y > thresh {
+                let glow = (((max_y - thresh) * mult) >> 2).min(35);
                 v = clamp_u8(v as i32 + glow);
-            }
-            if y1 > 185 {
-                let glow = (y1 as i32 - 185) >> 2;
-                v = clamp_u8(v as i32 + glow);
+                u = clamp_u8(u as i32 - (glow >> 1)); // warm amber shift
             }
         }
 
-        // Kodak Tri-X 400: Punchy high-contrast monochrome
+        // Kodak Tri-X 400: Punchy monochrome with optical contrast filters
         4 => {
+            if bw_filter > 0 {
+                let f = BwFilter::from_u32(bw_filter);
+                y0 = apply_bw_filter_luma(y0, u, v, f);
+                y1 = apply_bw_filter_luma(y1, u, v, f);
+            }
             let tri_curve = |y: u8| -> u8 {
                 let yi = y as i32;
                 if yi < 128 {
@@ -135,7 +140,6 @@ fn apply_film_stock(
 
             let u_diff = u as i32 - 128;
             let v_diff = v as i32 - 128;
-            // 75% -> (diff * 192) >> 8
             u = clamp_u8(128 + ((u_diff * 192) >> 8));
             v = clamp_u8(128 + ((v_diff * 192) >> 8));
         }
@@ -353,6 +357,8 @@ pub unsafe extern "C" fn rust_flt_process_row(
     rec_saturation: i32,
     rec_wb_ab: i32,
     rec_wb_gm: i32,
+    bw_filter: i32,
+    halation: i32,
 ) {
     if row_src.is_null() || row_dst.is_null() {
         return;
@@ -410,7 +416,7 @@ pub unsafe extern "C" fn rust_flt_process_row(
                 y1 >>= nd_s;
             } else {
                 if film_preset > 0 && film_preset <= 5 {
-                    let res = apply_film_stock(film_preset, y0, y1, u, v);
+                    let res = apply_film_stock(film_preset, bw_filter as u32, halation as u32, y0, y1, u, v);
                     y0 = res.0;
                     y1 = res.1;
                     u  = res.2;

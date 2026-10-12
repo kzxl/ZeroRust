@@ -111,8 +111,28 @@ impl FilmStock {
 
     #[inline(always)]
     pub fn apply_yuv422_pair(self, profile: &FilmProfile, y0: &mut u8, y1: &mut u8, u: &mut u8, v: &mut u8) {
+        self.apply_yuv422_pair_with_options(profile, crate::bw_filter::BwFilter::None, 0, y0, y1, u, v);
+    }
+
+    #[inline(always)]
+    pub fn apply_yuv422_pair_with_options(
+        self,
+        profile: &FilmProfile,
+        bw_filter: crate::bw_filter::BwFilter,
+        halation: u32,
+        y0: &mut u8,
+        y1: &mut u8,
+        u: &mut u8,
+        v: &mut u8,
+    ) {
         if self == FilmStock::Off {
             return;
+        }
+
+        // Apply optical B&W filter before luminance curve for monochrome stocks
+        if profile.sat_scale == 0 && bw_filter != crate::bw_filter::BwFilter::None {
+            *y0 = crate::bw_filter::apply_bw_filter_luma(*y0, *u, *v, bw_filter);
+            *y1 = crate::bw_filter::apply_bw_filter_luma(*y1, *u, *v, bw_filter);
         }
 
         // 1. Process Luminance (Y0, Y1) with contrast curve
@@ -141,8 +161,18 @@ impl FilmStock {
             let cross = profile.cross_talk as i32;
 
             // Saturation scaling with cross-talk color matrix
-            let new_u = 128 + ((du * sat + dv * cross) >> 8) + profile.u_tint as i32;
-            let new_v = 128 + ((dv * sat - du * cross) >> 8) + profile.v_tint as i32;
+            let mut new_u = 128 + ((du * sat + dv * cross) >> 8) + profile.u_tint as i32;
+            let mut new_v = 128 + ((dv * sat - du * cross) >> 8) + profile.v_tint as i32;
+
+            // Halation bloom on highlights (Cinestill 800T or custom halation)
+            let max_y = (*y0 as i32).max(*y1 as i32);
+            let thresh = if halation == 2 { 170 } else { 185 };
+            if (self == FilmStock::CineStill800T || halation > 0) && max_y > thresh {
+                let mult = if halation == 2 { 3 } else { 1 };
+                let glow = (((max_y - thresh) * mult) >> 2).min(35);
+                new_v += glow;
+                new_u -= glow >> 1;
+            }
 
             *u = new_u.clamp(0, 255) as u8;
             *v = new_v.clamp(0, 255) as u8;

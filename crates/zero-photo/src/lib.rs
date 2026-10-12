@@ -9,10 +9,12 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
+pub mod bw_filter;
 pub mod exposure;
 pub mod film_sim;
 pub mod row_filter;
 
+pub use bw_filter::{apply_bw_filter_luma, BwFilter};
 pub use exposure::{zero_photo_calc_nd_exposure, NdFilter, RawHistogram, HIST_BINS};
 pub use film_sim::{zero_film_sim_process_yuv422, FilmProfile, FilmStock};
 pub use row_filter::{div_u32, rust_flt_get_crop_bounds, rust_flt_process_row};
@@ -59,5 +61,27 @@ mod tests {
             rust_flt_get_crop_bounds(2, 720, 480, &mut ymin, &mut ymax, &mut xmin, &mut xmax);
         }
         assert_eq!((ymin, ymax, xmin, xmax), (83, 397, 0, 720));
+    }
+
+    #[test]
+    fn test_bw_filter() {
+        // Neutral gray stays neutral across all filters
+        for f in [BwFilter::None, BwFilter::Yellow, BwFilter::Orange, BwFilter::Red, BwFilter::Green] {
+            assert_eq!(apply_bw_filter_luma(128, 128, 128, f), 128);
+        }
+
+        // Blue sky (U > 128, low V) should be darkened by Red & Yellow filters
+        let (y, u, v) = (100u8, 180u8, 110u8);
+        let y_none = apply_bw_filter_luma(y, u, v, BwFilter::None);
+        let y_yellow = apply_bw_filter_luma(y, u, v, BwFilter::Yellow);
+        let y_red = apply_bw_filter_luma(y, u, v, BwFilter::Red);
+        assert!(y_yellow <= y_none, "Yellow filter must darken blue sky");
+        assert!(y_red < y_yellow, "Red filter must darken blue sky more aggressively than yellow");
+
+        // Green foliage (low U, low V) should be brightened by Green filter
+        let (yg, ug, vg) = (130u8, 100u8, 100u8);
+        let yg_none = apply_bw_filter_luma(yg, ug, vg, BwFilter::None);
+        let yg_green = apply_bw_filter_luma(yg, ug, vg, BwFilter::Green);
+        assert!(yg_green >= yg_none, "Green filter must brighten green foliage");
     }
 }
