@@ -13,11 +13,13 @@ pub mod bw_filter;
 pub mod exposure;
 pub mod film_sim;
 pub mod row_filter;
+pub mod split_focus;
 
 pub use bw_filter::{apply_bw_filter_luma, BwFilter};
 pub use exposure::{zero_photo_calc_nd_exposure, NdFilter, RawHistogram, HIST_BINS};
 pub use film_sim::{zero_film_sim_process_yuv422, FilmProfile, FilmStock};
 pub use row_filter::{div_u32, rust_flt_get_crop_bounds, rust_flt_process_row};
+pub use split_focus::{rust_split_get_circle_dx, rust_split_update_state, SplitFocusState, SPLIT_RETICLE_RADIUS};
 
 #[cfg(test)]
 mod tests {
@@ -83,5 +85,32 @@ mod tests {
         let yg_none = apply_bw_filter_luma(yg, ug, vg, BwFilter::None);
         let yg_green = apply_bw_filter_luma(yg, ug, vg, BwFilter::Green);
         assert!(yg_green >= yg_none, "Green filter must brighten green foliage");
+    }
+
+    #[test]
+    fn test_split_focus() {
+        let mut state = SplitFocusState::new();
+        assert_eq!(state.shear_offset, 12);
+        assert!(!state.is_locked);
+
+        // Feed low gradient (blurry)
+        for _ in 0..10 {
+            state.update(500);
+        }
+        assert!(!state.is_locked);
+        assert!(state.shear_offset > 0);
+
+        // Feed sharp gradient (peak focus)
+        for _ in 0..20 {
+            state.update(12_000);
+        }
+        assert!(state.focus_score >= 88);
+        assert!(state.is_locked);
+        assert_eq!(state.shear_offset, 0, "Shear must snap to 0 on focus lock");
+
+        // Test circle lookup table
+        assert_eq!(rust_split_get_circle_dx(0), 56);
+        assert_eq!(rust_split_get_circle_dx(56), 0);
+        assert_eq!(rust_split_get_circle_dx(60), 0); // Out of bounds safe
     }
 }
