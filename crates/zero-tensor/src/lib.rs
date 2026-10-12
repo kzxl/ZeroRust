@@ -7,13 +7,17 @@
 //! - ABI-stable C-FFI for ZeroPlatform (.NET C# P/Invoke) integration
 
 #![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::manual_div_ceil)]
+#![allow(clippy::manual_is_multiple_of)]
 
-pub mod gemm;
 pub mod attention;
-pub mod quant;
 pub mod ffi;
+pub mod gemm;
+pub mod quant;
 
-pub use gemm::gemm_f32;
 pub use attention::flash_attention_f32;
-pub use quant::{gemv_q4_0, gemv_q8_0};
 pub use ffi::*;
+pub use gemm::gemm_f32;
+pub use quant::{gemv_q4_0, gemv_q8_0};

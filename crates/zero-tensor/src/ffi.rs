@@ -3,8 +3,8 @@
 //! Provides ABI-stable, high-performance compute kernels for GEMM, FlashAttention,
 //! and Quantized Matrix-Vector multiplications.
 
-use crate::gemm;
 use crate::attention;
+use crate::gemm;
 use crate::quant;
 
 /// Returns the C-ABI version of ZeroRust Compute Engine (e.g. 100 for 1.0.0).
@@ -53,7 +53,21 @@ pub unsafe extern "C" fn zerorust_gemm_f32(
     }
 
     gemm::gemm_f32(
-        m, n, k, alpha, a, rsa, csa, b, rsb, csb, beta, c, rsc, csc, parallel != 0,
+        m,
+        n,
+        k,
+        alpha,
+        a,
+        rsa,
+        csa,
+        b,
+        rsb,
+        csb,
+        beta,
+        c,
+        rsc,
+        csc,
+        parallel != 0,
     );
     0
 }

@@ -60,8 +60,8 @@ pub unsafe fn gemm_f32(
                 let local_c = c_addr as *mut f32;
                 unsafe {
                     gemm_serial_range(
-                        m_start, m_end, n, k, alpha, local_a, rsa, csa, local_b, rsb, csb,
-                        beta, local_c, rsc, csc,
+                        m_start, m_end, n, k, alpha, local_a, rsa, csa, local_b, rsb, csb, beta,
+                        local_c, rsc, csc,
                     );
                 }
             }
@@ -105,8 +105,14 @@ pub(crate) unsafe fn gemm_serial_range(
 ) {
     #[cfg(target_arch = "x86_64")]
     {
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") && csb == 1 && csc == 1 {
-            gemm_avx2_range(m_start, m_end, n, k, alpha, a, rsa, csa, b, rsb, beta, c, rsc);
+        if is_x86_feature_detected!("avx2")
+            && is_x86_feature_detected!("fma")
+            && csb == 1
+            && csc == 1
+        {
+            gemm_avx2_range(
+                m_start, m_end, n, k, alpha, a, rsa, csa, b, rsb, beta, c, rsc,
+            );
             return;
         }
     }
@@ -386,7 +392,8 @@ unsafe fn gemm_fallback_range(
         for j in 0..n {
             let mut sum = 0.0f32;
             for p in 0..k {
-                sum += *row_a.offset(p as isize * csa) * *b.offset(p as isize * rsb + j as isize * csb);
+                sum += *row_a.offset(p as isize * csa)
+                    * *b.offset(p as isize * rsb + j as isize * csb);
             }
 
             let ptr_c = row_c.offset(j as isize * csc);

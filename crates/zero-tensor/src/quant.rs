@@ -63,7 +63,14 @@ pub unsafe fn gemv_q4_0(
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
             if n_rows < 32 {
                 for r in 0..n_rows {
-                    compute_q4_0_row_avx2(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+                    compute_q4_0_row_avx2(
+                        r,
+                        ptr_weight,
+                        p_act,
+                        p_dst,
+                        row_byte_stride,
+                        num_blocks_per_row,
+                    );
                 }
             } else {
                 let weight_addr = ptr_weight as usize;
@@ -75,7 +82,14 @@ pub unsafe fn gemv_q4_0(
                     let local_act = act_addr as *const f32;
                     let local_dst = dst_addr as *mut f32;
                     unsafe {
-                        compute_q4_0_row_avx2(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                        compute_q4_0_row_avx2(
+                            r,
+                            local_w,
+                            local_act,
+                            local_dst,
+                            row_byte_stride,
+                            num_blocks_per_row,
+                        );
                     }
                 });
             }
@@ -85,7 +99,14 @@ pub unsafe fn gemv_q4_0(
 
     if n_rows < 32 {
         for r in 0..n_rows {
-            compute_q4_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+            compute_q4_0_row_scalar(
+                r,
+                ptr_weight,
+                p_act,
+                p_dst,
+                row_byte_stride,
+                num_blocks_per_row,
+            );
         }
     } else {
         let weight_addr = ptr_weight as usize;
@@ -97,7 +118,14 @@ pub unsafe fn gemv_q4_0(
             let local_act = act_addr as *const f32;
             let local_dst = dst_addr as *mut f32;
             unsafe {
-                compute_q4_0_row_scalar(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                compute_q4_0_row_scalar(
+                    r,
+                    local_w,
+                    local_act,
+                    local_dst,
+                    row_byte_stride,
+                    num_blocks_per_row,
+                );
             }
         });
     }
@@ -211,7 +239,14 @@ pub unsafe fn gemv_q8_0(
         if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
             if n_rows < 32 {
                 for r in 0..n_rows {
-                    compute_q8_0_row_avx2(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+                    compute_q8_0_row_avx2(
+                        r,
+                        ptr_weight,
+                        p_act,
+                        p_dst,
+                        row_byte_stride,
+                        num_blocks_per_row,
+                    );
                 }
             } else {
                 let weight_addr = ptr_weight as usize;
@@ -223,7 +258,14 @@ pub unsafe fn gemv_q8_0(
                     let local_act = act_addr as *const f32;
                     let local_dst = dst_addr as *mut f32;
                     unsafe {
-                        compute_q8_0_row_avx2(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                        compute_q8_0_row_avx2(
+                            r,
+                            local_w,
+                            local_act,
+                            local_dst,
+                            row_byte_stride,
+                            num_blocks_per_row,
+                        );
                     }
                 });
             }
@@ -233,7 +275,14 @@ pub unsafe fn gemv_q8_0(
 
     if n_rows < 32 {
         for r in 0..n_rows {
-            compute_q8_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+            compute_q8_0_row_scalar(
+                r,
+                ptr_weight,
+                p_act,
+                p_dst,
+                row_byte_stride,
+                num_blocks_per_row,
+            );
         }
     } else {
         let weight_addr = ptr_weight as usize;
@@ -245,7 +294,14 @@ pub unsafe fn gemv_q8_0(
             let local_act = act_addr as *const f32;
             let local_dst = dst_addr as *mut f32;
             unsafe {
-                compute_q8_0_row_scalar(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                compute_q8_0_row_scalar(
+                    r,
+                    local_w,
+                    local_act,
+                    local_dst,
+                    row_byte_stride,
+                    num_blocks_per_row,
+                );
             }
         });
     }
@@ -273,8 +329,12 @@ unsafe fn compute_q8_0_row_avx2(
 
         let w0 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs as *const _)));
         let w1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(8) as *const _)));
-        let w2 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(16) as *const _)));
-        let w3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(24) as *const _)));
+        let w2 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(
+            _mm_loadl_epi64(qs.add(16) as *const _),
+        ));
+        let w3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(
+            _mm_loadl_epi64(qs.add(24) as *const _),
+        ));
 
         let v_dot0 = _mm256_mul_ps(w0, _mm256_loadu_ps(p_act.add(act_offset)));
         let v_dot1 = _mm256_mul_ps(w1, _mm256_loadu_ps(p_act.add(act_offset + 8)));

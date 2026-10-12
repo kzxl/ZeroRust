@@ -49,9 +49,27 @@ pub unsafe fn flash_attention_f32(
                     let b = row_idx / sq;
                     let i = row_idx % sq;
                     compute_row_avx2(
-                        b, i, sq, sk, d, dv, scale_factor, is_gqa, hq, hkv, gqa_group,
-                        q_batch_stride, k_batch_stride, v_batch_stride, out_batch_stride, mask_batch_stride,
-                        q, k, v, mask, out,
+                        b,
+                        i,
+                        sq,
+                        sk,
+                        d,
+                        dv,
+                        scale_factor,
+                        is_gqa,
+                        hq,
+                        hkv,
+                        gqa_group,
+                        q_batch_stride,
+                        k_batch_stride,
+                        v_batch_stride,
+                        out_batch_stride,
+                        mask_batch_stride,
+                        q,
+                        k,
+                        v,
+                        mask,
+                        out,
                     );
                 }
             } else {
@@ -61,23 +79,44 @@ pub unsafe fn flash_attention_f32(
                 let mask_addr = mask as usize;
                 let out_addr = out as usize;
 
-                (0..total_rows).into_par_iter().with_min_len(8).for_each(|row_idx| {
-                    let b = row_idx / sq;
-                    let i = row_idx % sq;
-                    let local_q = q_addr as *const f32;
-                    let local_k = k_addr as *const f32;
-                    let local_v = v_addr as *const f32;
-                    let local_mask = mask_addr as *const f32;
-                    let local_out = out_addr as *mut f32;
+                (0..total_rows)
+                    .into_par_iter()
+                    .with_min_len(8)
+                    .for_each(|row_idx| {
+                        let b = row_idx / sq;
+                        let i = row_idx % sq;
+                        let local_q = q_addr as *const f32;
+                        let local_k = k_addr as *const f32;
+                        let local_v = v_addr as *const f32;
+                        let local_mask = mask_addr as *const f32;
+                        let local_out = out_addr as *mut f32;
 
-                    unsafe {
-                        compute_row_avx2(
-                            b, i, sq, sk, d, dv, scale_factor, is_gqa, hq, hkv, gqa_group,
-                            q_batch_stride, k_batch_stride, v_batch_stride, out_batch_stride, mask_batch_stride,
-                            local_q, local_k, local_v, local_mask, local_out,
-                        );
-                    }
-                });
+                        unsafe {
+                            compute_row_avx2(
+                                b,
+                                i,
+                                sq,
+                                sk,
+                                d,
+                                dv,
+                                scale_factor,
+                                is_gqa,
+                                hq,
+                                hkv,
+                                gqa_group,
+                                q_batch_stride,
+                                k_batch_stride,
+                                v_batch_stride,
+                                out_batch_stride,
+                                mask_batch_stride,
+                                local_q,
+                                local_k,
+                                local_v,
+                                local_mask,
+                                local_out,
+                            );
+                        }
+                    });
             }
             return;
         }
@@ -88,9 +127,27 @@ pub unsafe fn flash_attention_f32(
             let b = row_idx / sq;
             let i = row_idx % sq;
             compute_row_scalar(
-                b, i, sq, sk, d, dv, scale_factor, is_gqa, hq, hkv, gqa_group,
-                q_batch_stride, k_batch_stride, v_batch_stride, out_batch_stride, mask_batch_stride,
-                q, k, v, mask, out,
+                b,
+                i,
+                sq,
+                sk,
+                d,
+                dv,
+                scale_factor,
+                is_gqa,
+                hq,
+                hkv,
+                gqa_group,
+                q_batch_stride,
+                k_batch_stride,
+                v_batch_stride,
+                out_batch_stride,
+                mask_batch_stride,
+                q,
+                k,
+                v,
+                mask,
+                out,
             );
         }
     } else {
@@ -100,23 +157,44 @@ pub unsafe fn flash_attention_f32(
         let mask_addr = mask as usize;
         let out_addr = out as usize;
 
-        (0..total_rows).into_par_iter().with_min_len(8).for_each(|row_idx| {
-            let b = row_idx / sq;
-            let i = row_idx % sq;
-            let local_q = q_addr as *const f32;
-            let local_k = k_addr as *const f32;
-            let local_v = v_addr as *const f32;
-            let local_mask = mask_addr as *const f32;
-            let local_out = out_addr as *mut f32;
+        (0..total_rows)
+            .into_par_iter()
+            .with_min_len(8)
+            .for_each(|row_idx| {
+                let b = row_idx / sq;
+                let i = row_idx % sq;
+                let local_q = q_addr as *const f32;
+                let local_k = k_addr as *const f32;
+                let local_v = v_addr as *const f32;
+                let local_mask = mask_addr as *const f32;
+                let local_out = out_addr as *mut f32;
 
-            unsafe {
-                compute_row_scalar(
-                    b, i, sq, sk, d, dv, scale_factor, is_gqa, hq, hkv, gqa_group,
-                    q_batch_stride, k_batch_stride, v_batch_stride, out_batch_stride, mask_batch_stride,
-                    local_q, local_k, local_v, local_mask, local_out,
-                );
-            }
-        });
+                unsafe {
+                    compute_row_scalar(
+                        b,
+                        i,
+                        sq,
+                        sk,
+                        d,
+                        dv,
+                        scale_factor,
+                        is_gqa,
+                        hq,
+                        hkv,
+                        gqa_group,
+                        q_batch_stride,
+                        k_batch_stride,
+                        v_batch_stride,
+                        out_batch_stride,
+                        mask_batch_stride,
+                        local_q,
+                        local_k,
+                        local_v,
+                        local_mask,
+                        local_out,
+                    );
+                }
+            });
     }
 }
 
@@ -191,7 +269,14 @@ unsafe fn compute_row_avx2(
         let blen = BC.min(sk - j0);
 
         compute_block_dots_avx2(
-            blen, j0, d, p_q_i, p_k_base, scale_factor, p_mask_row, &mut block_scores,
+            blen,
+            j0,
+            d,
+            p_q_i,
+            p_k_base,
+            scale_factor,
+            p_mask_row,
+            &mut block_scores,
         );
 
         let mut m_block = f32::NEG_INFINITY;

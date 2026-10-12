@@ -19,10 +19,20 @@ fn test_gemm_correctness() {
 
     unsafe {
         gemm_f32(
-            2, 2, 3,
-            1.0, a.as_ptr(), 3, 1,
-            b.as_ptr(), 2, 1,
-            0.0, c.as_mut_ptr(), 2, 1,
+            2,
+            2,
+            3,
+            1.0,
+            a.as_ptr(),
+            3,
+            1,
+            b.as_ptr(),
+            2,
+            1,
+            0.0,
+            c.as_mut_ptr(),
+            2,
+            1,
             false,
         );
     }
@@ -44,10 +54,20 @@ fn test_gemm_larger_matrix() {
 
     unsafe {
         gemm_f32(
-            m, n, k,
-            1.0, a.as_ptr(), k as isize, 1,
-            b.as_ptr(), n as isize, 1,
-            0.0, c.as_mut_ptr(), n as isize, 1,
+            m,
+            n,
+            k,
+            1.0,
+            a.as_ptr(),
+            k as isize,
+            1,
+            b.as_ptr(),
+            n as isize,
+            1,
+            0.0,
+            c.as_mut_ptr(),
+            n as isize,
+            1,
             true,
         );
     }
@@ -74,10 +94,21 @@ fn test_flash_attention() {
 
     unsafe {
         flash_attention_f32(
-            batch_count, sq, sk, d, dv, scale,
-            false, 1, 1, 1,
-            q.as_ptr(), k.as_ptr(), v.as_ptr(),
-            std::ptr::null(), out.as_mut_ptr(),
+            batch_count,
+            sq,
+            sk,
+            d,
+            dv,
+            scale,
+            false,
+            1,
+            1,
+            1,
+            q.as_ptr(),
+            k.as_ptr(),
+            v.as_ptr(),
+            std::ptr::null(),
+            out.as_mut_ptr(),
         );
     }
 
