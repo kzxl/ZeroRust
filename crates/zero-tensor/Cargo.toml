@@ -1,0 +1,23 @@
+[package]
+name = "zero-tensor"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-performance native compute substrate & microkernel acceleration for ZeroUniverse (AVX2/FMA GEMM, FlashAttention, and Quantized GEMV)"
+readme = "README.md"
+keywords = ["tensor", "gemm", "blas", "flash-attention", "simd"]
+categories.workspace = true
+
+[lib]
+name = "zero_tensor"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["std"]
+std = ["zero-core/std"]
+
+[dependencies]
+rayon = "1.12.0"
+zero-core = { path = "../zero-core", default-features = false }

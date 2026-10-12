@@ -23,6 +23,7 @@ members = [
     "crates/zero-input",
     "crates/zero-tunnel",
     "crates/zero-zconn",
+    "crates/zero-tensor",
 ]
 
 [workspace.package]
