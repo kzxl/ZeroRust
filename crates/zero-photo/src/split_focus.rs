@@ -69,7 +69,7 @@ impl SplitFocusState {
 
         // Focus score ratio: (q_smooth * 100) / q_peak
         if self.q_peak > 0 {
-            let score = (self.q_smooth * 100) / self.q_peak;
+            let score = crate::row_filter::div_u32(self.q_smooth * 100, self.q_peak);
             self.focus_score = score.min(100);
         } else {
             self.focus_score = 0;
@@ -84,7 +84,7 @@ impl SplitFocusState {
         } else {
             let def = 88 - self.focus_score;
             // Shear in steps of 2 pixels (even number for UYVY pixel pair alignment)
-            let s = ((def as i32 * 12) / 88) & !1;
+            let s = (crate::row_filter::div_u32(def * 12, 88) as i32) & !1;
             self.shear_offset = s.clamp(0, 14);
         }
     }
@@ -105,8 +105,8 @@ pub unsafe fn eval_row_gradient_uyvy(row_src: *const u32, xmin: i32, xmax: i32) 
         return 0;
     }
 
-    let start_pair = (xmin / 2).max(1) as usize;
-    let end_pair = (xmax / 2) as usize;
+    let start_pair = ((xmin >> 1).max(1)) as usize;
+    let end_pair = (xmax >> 1) as usize;
     let mut sum_grad: u32 = 0;
 
     for i in start_pair..end_pair {
