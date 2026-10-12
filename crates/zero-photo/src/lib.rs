@@ -1,8 +1,13 @@
-//! Computational photography, film simulation, and real-time visual row filters for ZeroRust.
-//!
-//! Designed for zero-heap, deterministic execution on both embedded camera targets and desktop tooling.
-
 #![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(not(feature = "std"))]
+use core::panic::PanicInfo;
+
+#[cfg(not(feature = "std"))]
+#[panic_handler]
+fn panic(_info: &PanicInfo) -> ! {
+    loop {}
+}
 
 pub mod exposure;
 pub mod film_sim;
