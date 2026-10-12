@@ -58,27 +58,54 @@ pub unsafe fn gemv_q4_0(
     const BYTES_PER_BLOCK: usize = 18;
     let row_byte_stride = num_blocks_per_row * BYTES_PER_BLOCK;
 
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            if n_rows < 32 {
+                for r in 0..n_rows {
+                    compute_q4_0_row_avx2(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+                }
+            } else {
+                let weight_addr = ptr_weight as usize;
+                let act_addr = p_act as usize;
+                let dst_addr = p_dst as usize;
+
+                (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
+                    let local_w = weight_addr as *const u8;
+                    let local_act = act_addr as *const f32;
+                    let local_dst = dst_addr as *mut f32;
+                    unsafe {
+                        compute_q4_0_row_avx2(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                    }
+                });
+            }
+            return;
+        }
+    }
+
     if n_rows < 32 {
         for r in 0..n_rows {
-            compute_q4_0_row(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+            compute_q4_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
         }
     } else {
         let weight_addr = ptr_weight as usize;
         let act_addr = p_act as usize;
         let dst_addr = p_dst as usize;
 
-        (0..n_rows).into_par_iter().for_each(|r| {
+        (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
             let local_w = weight_addr as *const u8;
             let local_act = act_addr as *const f32;
             let local_dst = dst_addr as *mut f32;
             unsafe {
-                compute_q4_0_row(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                compute_q4_0_row_scalar(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
             }
         });
     }
 }
 
-unsafe fn compute_q4_0_row(
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+unsafe fn compute_q4_0_row_avx2(
     r: usize,
     ptr_weight: *const u8,
     p_act: *const f32,
@@ -90,46 +117,53 @@ unsafe fn compute_q4_0_row(
     let mut sum = 0.0f32;
     let mut act_offset = 0;
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            let v_mask = _mm256_set1_epi32(0x0F);
-            let v_offset = _mm256_set1_epi32(8);
+    let v_mask = _mm256_set1_epi32(0x0F);
+    let v_offset = _mm256_set1_epi32(8);
 
-            for b in 0..num_blocks_per_row {
-                let block_ptr = p_row.add(b * 18);
-                let raw_scale = core::ptr::read_unaligned(block_ptr as *const u16);
-                let d = f16_to_f32(raw_scale);
-                let qs = block_ptr.add(2);
+    for b in 0..num_blocks_per_row {
+        let block_ptr = p_row.add(b * 18);
+        let raw_scale = core::ptr::read_unaligned(block_ptr as *const u16);
+        let d = f16_to_f32(raw_scale);
+        let qs = block_ptr.add(2);
 
-                let raw0 = _mm256_cvtepu8_epi32(_mm_loadl_epi64(qs as *const _));
-                let raw1 = _mm256_cvtepu8_epi32(_mm_loadl_epi64(qs.add(8) as *const _));
+        let raw0 = _mm256_cvtepu8_epi32(_mm_loadl_epi64(qs as *const _));
+        let raw1 = _mm256_cvtepu8_epi32(_mm_loadl_epi64(qs.add(8) as *const _));
 
-                let w0_0 = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_and_si256(raw0, v_mask), v_offset));
-                let w1_0 = _mm256_cvtepi32_ps(_mm256_sub_epi32(
-                    _mm256_and_si256(_mm256_srli_epi32(raw0, 4), v_mask),
-                    v_offset,
-                ));
+        let w0_0 = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_and_si256(raw0, v_mask), v_offset));
+        let w1_0 = _mm256_cvtepi32_ps(_mm256_sub_epi32(
+            _mm256_and_si256(_mm256_srli_epi32(raw0, 4), v_mask),
+            v_offset,
+        ));
 
-                let w0_1 = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_and_si256(raw1, v_mask), v_offset));
-                let w1_1 = _mm256_cvtepi32_ps(_mm256_sub_epi32(
-                    _mm256_and_si256(_mm256_srli_epi32(raw1, 4), v_mask),
-                    v_offset,
-                ));
+        let w0_1 = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_and_si256(raw1, v_mask), v_offset));
+        let w1_1 = _mm256_cvtepi32_ps(_mm256_sub_epi32(
+            _mm256_and_si256(_mm256_srli_epi32(raw1, 4), v_mask),
+            v_offset,
+        ));
 
-                let v_dot0 = _mm256_mul_ps(w0_0, _mm256_loadu_ps(p_act.add(act_offset)));
-                let v_dot1 = _mm256_mul_ps(w0_1, _mm256_loadu_ps(p_act.add(act_offset + 8)));
-                let v_dot2 = _mm256_fmadd_ps(w1_0, _mm256_loadu_ps(p_act.add(act_offset + 16)), v_dot0);
-                let v_dot3 = _mm256_fmadd_ps(w1_1, _mm256_loadu_ps(p_act.add(act_offset + 24)), v_dot1);
+        let v_dot0 = _mm256_mul_ps(w0_0, _mm256_loadu_ps(p_act.add(act_offset)));
+        let v_dot1 = _mm256_mul_ps(w0_1, _mm256_loadu_ps(p_act.add(act_offset + 8)));
+        let v_dot2 = _mm256_fmadd_ps(w1_0, _mm256_loadu_ps(p_act.add(act_offset + 16)), v_dot0);
+        let v_dot3 = _mm256_fmadd_ps(w1_1, _mm256_loadu_ps(p_act.add(act_offset + 24)), v_dot1);
 
-                sum += hsum_avx(_mm256_add_ps(v_dot2, v_dot3)) * d;
-                act_offset += QK4_0;
-            }
-
-            *p_dst.add(r) = sum;
-            return;
-        }
+        sum += hsum_avx(_mm256_add_ps(v_dot2, v_dot3)) * d;
+        act_offset += QK4_0;
     }
+
+    *p_dst.add(r) = sum;
+}
+
+unsafe fn compute_q4_0_row_scalar(
+    r: usize,
+    ptr_weight: *const u8,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    row_byte_stride: usize,
+    num_blocks_per_row: usize,
+) {
+    let p_row = ptr_weight.add(r * row_byte_stride);
+    let mut sum = 0.0f32;
+    let mut act_offset = 0;
 
     for b in 0..num_blocks_per_row {
         let block_ptr = p_row.add(b * 18);
@@ -172,27 +206,54 @@ pub unsafe fn gemv_q8_0(
     const BYTES_PER_BLOCK: usize = 34;
     let row_byte_stride = num_blocks_per_row * BYTES_PER_BLOCK;
 
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+            if n_rows < 32 {
+                for r in 0..n_rows {
+                    compute_q8_0_row_avx2(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+                }
+            } else {
+                let weight_addr = ptr_weight as usize;
+                let act_addr = p_act as usize;
+                let dst_addr = p_dst as usize;
+
+                (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
+                    let local_w = weight_addr as *const u8;
+                    let local_act = act_addr as *const f32;
+                    let local_dst = dst_addr as *mut f32;
+                    unsafe {
+                        compute_q8_0_row_avx2(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                    }
+                });
+            }
+            return;
+        }
+    }
+
     if n_rows < 32 {
         for r in 0..n_rows {
-            compute_q8_0_row(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
+            compute_q8_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks_per_row);
         }
     } else {
         let weight_addr = ptr_weight as usize;
         let act_addr = p_act as usize;
         let dst_addr = p_dst as usize;
 
-        (0..n_rows).into_par_iter().for_each(|r| {
+        (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
             let local_w = weight_addr as *const u8;
             let local_act = act_addr as *const f32;
             let local_dst = dst_addr as *mut f32;
             unsafe {
-                compute_q8_0_row(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
+                compute_q8_0_row_scalar(r, local_w, local_act, local_dst, row_byte_stride, num_blocks_per_row);
             }
         });
     }
 }
 
-unsafe fn compute_q8_0_row(
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2", enable = "fma")]
+unsafe fn compute_q8_0_row_avx2(
     r: usize,
     ptr_weight: *const u8,
     p_act: *const f32,
@@ -204,33 +265,40 @@ unsafe fn compute_q8_0_row(
     let mut sum = 0.0f32;
     let mut act_offset = 0;
 
-    #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
-            for b in 0..num_blocks_per_row {
-                let block_ptr = p_row.add(b * 34);
-                let raw_scale = core::ptr::read_unaligned(block_ptr as *const u16);
-                let d = f16_to_f32(raw_scale);
-                let qs = block_ptr.add(2) as *const i8;
+    for b in 0..num_blocks_per_row {
+        let block_ptr = p_row.add(b * 34);
+        let raw_scale = core::ptr::read_unaligned(block_ptr as *const u16);
+        let d = f16_to_f32(raw_scale);
+        let qs = block_ptr.add(2) as *const i8;
 
-                let w0 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs as *const _)));
-                let w1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(8) as *const _)));
-                let w2 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(16) as *const _)));
-                let w3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(24) as *const _)));
+        let w0 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs as *const _)));
+        let w1 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(8) as *const _)));
+        let w2 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(16) as *const _)));
+        let w3 = _mm256_cvtepi32_ps(_mm256_cvtepi8_epi32(_mm_loadl_epi64(qs.add(24) as *const _)));
 
-                let v_dot0 = _mm256_mul_ps(w0, _mm256_loadu_ps(p_act.add(act_offset)));
-                let v_dot1 = _mm256_mul_ps(w1, _mm256_loadu_ps(p_act.add(act_offset + 8)));
-                let v_dot2 = _mm256_fmadd_ps(w2, _mm256_loadu_ps(p_act.add(act_offset + 16)), v_dot0);
-                let v_dot3 = _mm256_fmadd_ps(w3, _mm256_loadu_ps(p_act.add(act_offset + 24)), v_dot1);
+        let v_dot0 = _mm256_mul_ps(w0, _mm256_loadu_ps(p_act.add(act_offset)));
+        let v_dot1 = _mm256_mul_ps(w1, _mm256_loadu_ps(p_act.add(act_offset + 8)));
+        let v_dot2 = _mm256_fmadd_ps(w2, _mm256_loadu_ps(p_act.add(act_offset + 16)), v_dot0);
+        let v_dot3 = _mm256_fmadd_ps(w3, _mm256_loadu_ps(p_act.add(act_offset + 24)), v_dot1);
 
-                sum += hsum_avx(_mm256_add_ps(v_dot2, v_dot3)) * d;
-                act_offset += QK8_0;
-            }
-
-            *p_dst.add(r) = sum;
-            return;
-        }
+        sum += hsum_avx(_mm256_add_ps(v_dot2, v_dot3)) * d;
+        act_offset += QK8_0;
     }
+
+    *p_dst.add(r) = sum;
+}
+
+unsafe fn compute_q8_0_row_scalar(
+    r: usize,
+    ptr_weight: *const u8,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    row_byte_stride: usize,
+    num_blocks_per_row: usize,
+) {
+    let p_row = ptr_weight.add(r * row_byte_stride);
+    let mut sum = 0.0f32;
+    let mut act_offset = 0;
 
     for b in 0..num_blocks_per_row {
         let block_ptr = p_row.add(b * 34);
