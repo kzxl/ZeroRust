@@ -12,12 +12,15 @@ categories.workspace = true
 
 [lib]
 name = "zero_tensor"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [features]
 default = ["std"]
-std = ["zero-core/std"]
+std = ["zero-core/std", "zero-simd/std", "zero-compute/std"]
+ffi = []
 
 [dependencies]
 rayon = "1.12.0"
 zero-core = { path = "../zero-core", default-features = false }
+zero-simd = { path = "../zero-simd", default-features = false }
+zero-compute = { path = "../zero-compute", default-features = false }

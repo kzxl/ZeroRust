@@ -4,3 +4,9 @@
 .idea/
 .vscode/
 *.log
+*.obj
+*.exe
+samples/**/*.dll
+samples/**/*.exe
+samples/**/*.obj
+

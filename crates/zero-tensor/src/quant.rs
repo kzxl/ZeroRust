@@ -389,3 +389,77 @@ unsafe fn hsum_avx(v: __m256) -> f32 {
     let shuf2 = _mm_shuffle_ps(sums, sums, 1);
     _mm_cvtss_f32(_mm_add_ss(sums, shuf2))
 }
+
+/// Streaming on-the-fly FP8 (E4M3) Matrix-Vector multiplication.
+///
+/// # Safety
+/// Pointers must point to valid allocations satisfying specified dimensions.
+pub unsafe fn gemv_fp8(
+    ptr_weight: *const u8,
+    scale: f32,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    n_rows: usize,
+    k_cols: usize,
+) {
+    if n_rows == 0 || k_cols == 0 {
+        return;
+    }
+
+    if n_rows < 32 {
+        for r in 0..n_rows {
+            zero_simd::compute_fp8_row(r, ptr_weight, scale, p_act, p_dst, k_cols);
+        }
+    } else {
+        let weight_addr = ptr_weight as usize;
+        let act_addr = p_act as usize;
+        let dst_addr = p_dst as usize;
+
+        (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
+            let local_w = weight_addr as *const u8;
+            let local_act = act_addr as *const f32;
+            let local_dst = dst_addr as *mut f32;
+            unsafe {
+                zero_simd::compute_fp8_row(r, local_w, scale, local_act, local_dst, k_cols);
+            }
+        });
+    }
+}
+
+/// Streaming on-the-fly Q4_K Matrix-Vector multiplication.
+///
+/// # Safety
+/// Pointers must point to valid allocations satisfying specified dimensions.
+pub unsafe fn gemv_q4_k(
+    ptr_weight: *const u8,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    n_rows: usize,
+    k_cols: usize,
+) {
+    if k_cols % zero_simd::QK_K != 0 || n_rows == 0 {
+        return;
+    }
+
+    let num_super_blocks = k_cols / zero_simd::QK_K;
+    let row_byte_stride = num_super_blocks * zero_simd::BYTES_PER_BLOCK_Q4_K;
+
+    if n_rows < 32 {
+        for r in 0..n_rows {
+            zero_simd::compute_q4_k_row(r, ptr_weight, p_act, p_dst, row_byte_stride, num_super_blocks);
+        }
+    } else {
+        let weight_addr = ptr_weight as usize;
+        let act_addr = p_act as usize;
+        let dst_addr = p_dst as usize;
+
+        (0..n_rows).into_par_iter().with_min_len(64).for_each(|r| {
+            let local_w = weight_addr as *const u8;
+            let local_act = act_addr as *const f32;
+            let local_dst = dst_addr as *mut f32;
+            unsafe {
+                zero_simd::compute_q4_k_row(r, local_w, local_act, local_dst, row_byte_stride, num_super_blocks);
+            }
+        });
+    }
+}

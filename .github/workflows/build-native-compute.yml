@@ -1,0 +1,51 @@
+name: Build Native Compute Substrate
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'crates/zero-simd/**'
+      - 'crates/zero-compute/**'
+      - 'crates/zero-tensor/**'
+      - 'crates/zero-compute-ffi/**'
+      - '.github/workflows/build-native-compute.yml'
+  workflow_dispatch:
+
+jobs:
+  build-native:
+    name: Build Native (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            output_file: zero_compute.dll
+            runtime_id: win-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            output_file: libzero_compute.so
+            runtime_id: linux-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            output_file: libzero_compute.dylib
+            runtime_id: osx-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }} -p zero-compute-ffi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zero-compute-${{ matrix.runtime_id }}
+          path: target/${{ matrix.target }}/release/${{ matrix.output_file }}

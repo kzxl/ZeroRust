@@ -94,6 +94,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "zero-compute"
+version = "0.1.0"
+dependencies = [
+ "rayon",
+ "zero-core",
+ "zero-simd",
+]
+
+[[package]]
+name = "zero-compute-ffi"
+version = "0.1.0"
+dependencies = [
+ "zero-compute",
+ "zero-core",
+ "zero-simd",
+ "zero-tensor",
+]
+
+[[package]]
 name = "zero-core"
 version = "0.1.0"
 
@@ -195,6 +214,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "zero-simd"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+]
+
+[[package]]
 name = "zero-sys"
 version = "0.1.0"
 dependencies = [
@@ -206,7 +232,9 @@ name = "zero-tensor"
 version = "0.1.0"
 dependencies = [
  "rayon",
+ "zero-compute",
  "zero-core",
+ "zero-simd",
 ]
 
 [[package]]

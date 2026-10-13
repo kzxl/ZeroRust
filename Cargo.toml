@@ -26,6 +26,9 @@ members = [
     "crates/zero-tensor",
     "crates/zero-photo",
     "crates/zero-d4",
+    "crates/zero-simd",
+    "crates/zero-compute",
+    "crates/zero-compute-ffi",
 ]
 
 [workspace.package]

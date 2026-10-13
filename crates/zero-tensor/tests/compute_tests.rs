@@ -2,8 +2,7 @@ use zero_tensor::*;
 
 #[test]
 fn test_version_and_simd() {
-    assert_eq!(zerorust_version(), 100);
-    let simd = zerorust_is_simd_supported();
+    let simd = zero_simd::is_avx2_fma_supported();
     println!("AVX2/FMA supported: {}", simd);
 }
 

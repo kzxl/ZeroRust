@@ -1,0 +1,21 @@
+[package]
+name = "zero-compute-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Universal C-ABI export gateway and native dynamic library generator for ZeroUniverse Compute Substrate"
+readme = "README.md"
+keywords = ["ffi", "c-abi", "compute", "dll"]
+categories.workspace = true
+
+[lib]
+name = "zero_compute"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+zero-core = { path = "../zero-core" }
+zero-simd = { path = "../zero-simd" }
+zero-compute = { path = "../zero-compute" }
+zero-tensor = { path = "../zero-tensor" }
