@@ -10,9 +10,12 @@ pub mod cpu;
 pub mod device;
 pub mod gpu;
 pub mod scheduler;
+pub mod shaders;
 
 pub use cpu::*;
 pub use device::*;
 pub use gpu::*;
 pub use scheduler::*;
+pub use shaders::*;
+
 

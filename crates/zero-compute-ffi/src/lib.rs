@@ -451,3 +451,220 @@ pub unsafe extern "C" fn zc_rope_f32(
         Err(_) => ZC_ERR_PANIC,
     }
 }
+
+// ============================================================================
+// PagedAttention & End-to-End Transformer Decoder Layer
+// ============================================================================
+
+/// Evaluates vLLM-style PagedAttention over non-contiguous KV-Cache blocks.
+///
+/// # Safety
+/// Pointers must point to valid allocations matching the specified dimensions.
+#[no_mangle]
+pub unsafe extern "C" fn zc_paged_attention_f32(
+    num_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    block_size: usize,
+    context_len: usize,
+    scale: f32,
+    q: *const f32,
+    k_cache: *const f32,
+    v_cache: *const f32,
+    block_table: *const i32,
+    out: *mut f32,
+) -> i32 {
+    if q.is_null() || k_cache.is_null() || v_cache.is_null() || block_table.is_null() || out.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        zero_tensor::paged_attention_f32(
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            block_size,
+            context_len,
+            scale,
+            q,
+            k_cache,
+            v_cache,
+            block_table,
+            out,
+        );
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Evaluates an End-to-End FP32 Transformer Decoder Layer for single-token decoding at `pos`.
+///
+/// # Safety
+/// All pointers must point to valid allocations matching the layer dimensions.
+#[no_mangle]
+pub unsafe extern "C" fn zc_transformer_layer_f32(
+    hidden_dim: usize,
+    intermediate_dim: usize,
+    num_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    pos: usize,
+    rms_eps: f32,
+    rope_theta: f32,
+    x: *mut f32,
+    rms_attn_w: *const f32,
+    wq: *const f32,
+    wk: *const f32,
+    wv: *const f32,
+    wo: *const f32,
+    rms_ffn_w: *const f32,
+    w_gate: *const f32,
+    w_up: *const f32,
+    w_down: *const f32,
+    k_cache: *mut f32,
+    v_cache: *mut f32,
+) -> i32 {
+    if x.is_null()
+        || rms_attn_w.is_null()
+        || wq.is_null()
+        || wk.is_null()
+        || wv.is_null()
+        || wo.is_null()
+        || rms_ffn_w.is_null()
+        || w_gate.is_null()
+        || w_up.is_null()
+        || w_down.is_null()
+        || k_cache.is_null()
+        || v_cache.is_null()
+    {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        zero_tensor::transformer_layer_f32(
+            hidden_dim,
+            intermediate_dim,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            pos,
+            rms_eps,
+            rope_theta,
+            x,
+            rms_attn_w,
+            wq,
+            wk,
+            wv,
+            wo,
+            rms_ffn_w,
+            w_gate,
+            w_up,
+            w_down,
+            k_cache,
+            v_cache,
+        );
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Evaluates an End-to-End Quantized Q4_0 Transformer Decoder Layer for single-token decoding at `pos`.
+///
+/// # Safety
+/// All pointers must point to valid allocations matching the layer dimensions.
+#[no_mangle]
+pub unsafe extern "C" fn zc_transformer_layer_q4_0(
+    hidden_dim: usize,
+    intermediate_dim: usize,
+    num_heads: usize,
+    num_kv_heads: usize,
+    head_dim: usize,
+    pos: usize,
+    rms_eps: f32,
+    rope_theta: f32,
+    x: *mut f32,
+    rms_attn_w: *const f32,
+    wq_q4: *const u8,
+    wk_q4: *const u8,
+    wv_q4: *const u8,
+    wo_q4: *const u8,
+    rms_ffn_w: *const f32,
+    w_gate_q4: *const u8,
+    w_up_q4: *const u8,
+    w_down_q4: *const u8,
+    k_cache: *mut f32,
+    v_cache: *mut f32,
+) -> i32 {
+    if x.is_null()
+        || rms_attn_w.is_null()
+        || wq_q4.is_null()
+        || wk_q4.is_null()
+        || wv_q4.is_null()
+        || wo_q4.is_null()
+        || rms_ffn_w.is_null()
+        || w_gate_q4.is_null()
+        || w_up_q4.is_null()
+        || w_down_q4.is_null()
+        || k_cache.is_null()
+        || v_cache.is_null()
+    {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        zero_tensor::transformer_layer_q4_0(
+            hidden_dim,
+            intermediate_dim,
+            num_heads,
+            num_kv_heads,
+            head_dim,
+            pos,
+            rms_eps,
+            rope_theta,
+            x,
+            rms_attn_w,
+            wq_q4,
+            wk_q4,
+            wv_q4,
+            wo_q4,
+            rms_ffn_w,
+            w_gate_q4,
+            w_up_q4,
+            w_down_q4,
+            k_cache,
+            v_cache,
+        );
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Evaluates high-performance Int8 dot product with Int32 accumulation.
+///
+/// # Safety
+/// Pointers `a`, `b`, and `out` must point to valid allocations.
+#[no_mangle]
+pub unsafe extern "C" fn zc_dot_i8(n: usize, a: *const i8, b: *const i8, out: *mut i32) -> i32 {
+    if a.is_null() || b.is_null() || out.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        *out = zero_simd::dot_i8(n, a, b);
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+

@@ -1,7 +1,11 @@
 //! Vectorized Normalization layers (RMSNorm, LayerNorm).
+//! Supports x86_64 (AVX-512, AVX2+FMA) and ARM64 (NEON).
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+use core::arch::aarch64::*;
 
 /// Evaluates Root Mean Square Normalization (RMSNorm):
 /// dst[i] = (x[i] / sqrt(mean(x^2) + eps)) * weight[i]
@@ -24,7 +28,9 @@ pub unsafe fn rms_norm(
 
     #[cfg(target_arch = "x86_64")]
     {
-        if crate::microkernel::is_avx2_fma_supported() && n >= 8 {
+        if crate::microkernel::is_avx512_supported() && n >= 16 {
+            sum_sq = sum_sq_avx512(n, x);
+        } else if crate::microkernel::is_avx2_fma_supported() && n >= 8 {
             sum_sq = sum_sq_avx2(n, x);
         } else {
             for i in 0..n {
@@ -33,7 +39,18 @@ pub unsafe fn rms_norm(
             }
         }
     }
-    #[cfg(not(target_arch = "x86_64"))]
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 4 {
+            sum_sq = sum_sq_neon(n, x);
+        } else {
+            for i in 0..n {
+                let v = *x.add(i);
+                sum_sq += v * v;
+            }
+        }
+    }
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
     {
         for i in 0..n {
             let v = *x.add(i);
@@ -47,14 +64,121 @@ pub unsafe fn rms_norm(
     // 2. Normalize and scale by weight
     #[cfg(target_arch = "x86_64")]
     {
+        if crate::microkernel::is_avx512_supported() && n >= 16 {
+            normalize_and_scale_avx512(n, x, weight, dst, inv_rms);
+            return;
+        }
         if crate::microkernel::is_avx2_fma_supported() && n >= 8 {
             normalize_and_scale_avx2(n, x, weight, dst, inv_rms);
+            return;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 4 {
+            normalize_and_scale_neon(n, x, weight, dst, inv_rms);
             return;
         }
     }
 
     for i in 0..n {
         *dst.add(i) = (*x.add(i) * inv_rms) * *weight.add(i);
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn sum_sq_avx512(n: usize, x: *const f32) -> f32 {
+    let mut acc = _mm512_setzero_ps();
+    let mut i = 0;
+
+    while i + 16 <= n {
+        let vx = _mm512_loadu_ps(x.add(i));
+        acc = _mm512_fmadd_ps(vx, vx, acc);
+        i += 16;
+    }
+
+    let mut total = _mm512_reduce_add_ps(acc);
+    while i < n {
+        let v = *x.add(i);
+        total += v * v;
+        i += 1;
+    }
+    total
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn normalize_and_scale_avx512(
+    n: usize,
+    x: *const f32,
+    weight: *const f32,
+    dst: *mut f32,
+    inv_rms: f32,
+) {
+    let v_scale = _mm512_set1_ps(inv_rms);
+    let mut i = 0;
+
+    while i + 16 <= n {
+        let vx = _mm512_loadu_ps(x.add(i));
+        let vw = _mm512_loadu_ps(weight.add(i));
+        let v_norm = _mm512_mul_ps(vx, v_scale);
+        let v_out = _mm512_mul_ps(v_norm, vw);
+        _mm512_storeu_ps(dst.add(i), v_out);
+        i += 16;
+    }
+
+    while i < n {
+        *dst.add(i) = (*x.add(i) * inv_rms) * *weight.add(i);
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn sum_sq_neon(n: usize, x: *const f32) -> f32 {
+    let mut acc = vdupq_n_f32(0.0);
+    let mut i = 0;
+
+    while i + 4 <= n {
+        let vx = vld1q_f32(x.add(i));
+        acc = vfmaq_f32(acc, vx, vx);
+        i += 4;
+    }
+
+    let mut total = vaddvq_f32(acc);
+    while i < n {
+        let v = *x.add(i);
+        total += v * v;
+        i += 1;
+    }
+    total
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn normalize_and_scale_neon(
+    n: usize,
+    x: *const f32,
+    weight: *const f32,
+    dst: *mut f32,
+    inv_rms: f32,
+) {
+    let v_scale = vdupq_n_f32(inv_rms);
+    let mut i = 0;
+
+    while i + 4 <= n {
+        let vx = vld1q_f32(x.add(i));
+        let vw = vld1q_f32(weight.add(i));
+        let v_norm = vmulq_f32(vx, v_scale);
+        let v_out = vmulq_f32(v_norm, vw);
+        vst1q_f32(dst.add(i), v_out);
+        i += 4;
+    }
+
+    while i < n {
+        *dst.add(i) = (*x.add(i) * inv_rms) * *weight.add(i);
+        i += 1;
     }
 }
 

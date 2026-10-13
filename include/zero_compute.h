@@ -241,10 +241,10 @@ int32_t zc_gemv_q4_k(
 /**
  * @brief Evaluates Rotary Position Embedding (RoPE) in-place on tensor data.
  *
- * Shape: [num_tokens, num_heads, head_dim].
+ * Shape: [num_heads, seq_len, head_dim].
  *
- * @param num_tokens Number of tokens in batch/sequence.
  * @param num_heads Number of attention heads.
+ * @param seq_len Number of tokens in sequence.
  * @param head_dim Dimension per head (must be even).
  * @param pos_offset Token starting position offset.
  * @param theta_base Rotary base frequency (e.g. 10000.0f or 500000.0f).
@@ -252,13 +252,110 @@ int32_t zc_gemv_q4_k(
  * @return int32_t ZC_SUCCESS (0) on success, or negative error code.
  */
 int32_t zc_rope_f32(
-    size_t num_tokens,
     size_t num_heads,
+    size_t seq_len,
     size_t head_dim,
     size_t pos_offset,
     float theta_base,
     float* x
 );
+
+/**
+ * @brief Evaluates vLLM-style PagedAttention over non-contiguous KV-Cache blocks.
+ *
+ * @param num_heads Number of query heads.
+ * @param num_kv_heads Number of key/value heads (supports GQA).
+ * @param head_dim Dimension per attention head.
+ * @param block_size Number of tokens per physical KV block.
+ * @param context_len Total valid tokens in context.
+ * @param scale Attention scaling factor (1.0f / sqrt(head_dim)).
+ * @param q Query vector [num_heads, head_dim].
+ * @param k_cache Physical Key block pool [num_blocks, block_size, num_kv_heads, head_dim].
+ * @param v_cache Physical Value block pool [num_blocks, block_size, num_kv_heads, head_dim].
+ * @param block_table Logical-to-physical block index mapping table.
+ * @param out Output attention vector [num_heads, head_dim].
+ * @return int32_t ZC_SUCCESS (0) on success, or negative error code.
+ */
+int32_t zc_paged_attention_f32(
+    size_t num_heads,
+    size_t num_kv_heads,
+    size_t head_dim,
+    size_t block_size,
+    size_t context_len,
+    float scale,
+    const float* q,
+    const float* k_cache,
+    const float* v_cache,
+    const int32_t* block_table,
+    float* out
+);
+
+/**
+ * @brief Evaluates an End-to-End FP32 Transformer Decoder Layer for single-token decoding at `pos`.
+ *
+ * @return int32_t ZC_SUCCESS (0) on success, or negative error code.
+ */
+int32_t zc_transformer_layer_f32(
+    size_t hidden_dim,
+    size_t intermediate_dim,
+    size_t num_heads,
+    size_t num_kv_heads,
+    size_t head_dim,
+    size_t pos,
+    float rms_eps,
+    float rope_theta,
+    float* x,
+    const float* rms_attn_w,
+    const float* wq,
+    const float* wk,
+    const float* wv,
+    const float* wo,
+    const float* rms_ffn_w,
+    const float* w_gate,
+    const float* w_up,
+    const float* w_down,
+    float* k_cache,
+    float* v_cache
+);
+
+/**
+ * @brief Evaluates an End-to-End Quantized Q4_0 Transformer Decoder Layer for single-token decoding at `pos`.
+ *
+ * @return int32_t ZC_SUCCESS (0) on success, or negative error code.
+ */
+int32_t zc_transformer_layer_q4_0(
+    size_t hidden_dim,
+    size_t intermediate_dim,
+    size_t num_heads,
+    size_t num_kv_heads,
+    size_t head_dim,
+    size_t pos,
+    float rms_eps,
+    float rope_theta,
+    float* x,
+    const float* rms_attn_w,
+    const uint8_t* wq_q4,
+    const uint8_t* wk_q4,
+    const uint8_t* wv_q4,
+    const uint8_t* wo_q4,
+    const float* rms_ffn_w,
+    const uint8_t* w_gate_q4,
+    const uint8_t* w_up_q4,
+    const uint8_t* w_down_q4,
+    float* k_cache,
+    float* v_cache
+);
+
+/**
+ * @brief Evaluates high-performance Int8 dot product with Int32 accumulation.
+ */
+int32_t zc_dot_i8(
+    size_t n,
+    const int8_t* a,
+    const int8_t* b,
+    int32_t* out
+);
+
 
 /* ========================================================================= */
 /* Backward Compatibility Aliases for zerorust_*                             */

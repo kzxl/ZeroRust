@@ -222,7 +222,109 @@ impl GpuDevice {
         if workgroups.0 == 0 || workgroups.1 == 0 || workgroups.2 == 0 {
             return Err(ComputeError::InvalidDimensions);
         }
-        // In Mock mode, dispatch is a verified no-op or simulated kernel execution.
+        Ok(())
+    }
+
+    /// Compiles and dispatches the canonical 16x16 tiled WGSL GEMM compute pipeline.
+    #[cfg(feature = "std")]
+    pub fn execute_gemm_f32(
+        &self,
+        m: usize,
+        n: usize,
+        k: usize,
+        alpha: f32,
+        a: &[f32],
+        b: &[f32],
+        beta: f32,
+        c: &mut [f32],
+    ) -> Result<(), ComputeError> {
+        if a.len() < m * k || b.len() < k * n || c.len() < m * n {
+            return Err(ComputeError::InvalidDimensions);
+        }
+
+        let pipeline = self.create_compute_pipeline(GpuPipelineDescriptor {
+            label: "zc_wgsl_gemm_f32",
+            entry_point: "main",
+            workgroup_size: [16, 16, 1],
+            shader_source: crate::shaders::WGSL_GEMM_F32,
+        })?;
+
+        let buf_a = self.create_buffer(m * k * 4, GpuBufferUsage::STORAGE)?;
+        let buf_b = self.create_buffer(k * n * 4, GpuBufferUsage::STORAGE)?;
+        let buf_c = self.create_buffer(m * n * 4, GpuBufferUsage::STORAGE)?;
+
+        let a_bytes = unsafe { core::slice::from_raw_parts(a.as_ptr() as *const u8, m * k * 4) };
+        let b_bytes = unsafe { core::slice::from_raw_parts(b.as_ptr() as *const u8, k * n * 4) };
+        self.write_buffer(&buf_a, 0, a_bytes)?;
+        self.write_buffer(&buf_b, 0, b_bytes)?;
+
+        let wg_x = ((n as u32) + 15) / 16;
+        let wg_y = ((m as u32) + 15) / 16;
+        self.dispatch(&pipeline, (wg_x.max(1), wg_y.max(1), 1), &[&buf_a, &buf_b, &buf_c])?;
+
+        if self.backend == GpuBackendKind::Mock {
+            unsafe {
+                zero_simd::gemm_serial_range(
+                    0,
+                    m,
+                    n,
+                    k,
+                    alpha,
+                    a.as_ptr(),
+                    k as isize,
+                    1,
+                    b.as_ptr(),
+                    n as isize,
+                    1,
+                    beta,
+                    c.as_mut_ptr(),
+                    n as isize,
+                    1,
+                );
+            }
+            let c_bytes = unsafe { core::slice::from_raw_parts(c.as_ptr() as *const u8, m * n * 4) };
+            self.write_buffer(&buf_c, 0, c_bytes)?;
+        }
+
+        let c_out_bytes = unsafe { core::slice::from_raw_parts_mut(c.as_mut_ptr() as *mut u8, m * n * 4) };
+        self.read_buffer(&buf_c, 0, c_out_bytes)?;
+        self.synchronize()?;
+        Ok(())
+    }
+
+    /// Compiles and dispatches the canonical WGSL RMSNorm compute pipeline.
+    #[cfg(feature = "std")]
+    pub fn execute_rmsnorm_f32(
+        &self,
+        x: &[f32],
+        weight: &[f32],
+        eps: f32,
+        out: &mut [f32],
+    ) -> Result<(), ComputeError> {
+        let n = x.len();
+        if n == 0 || weight.len() < n || out.len() < n {
+            return Err(ComputeError::InvalidDimensions);
+        }
+
+        let pipeline = self.create_compute_pipeline(GpuPipelineDescriptor {
+            label: "zc_wgsl_rmsnorm_f32",
+            entry_point: "main",
+            workgroup_size: [256, 1, 1],
+            shader_source: crate::shaders::WGSL_RMSNORM_F32,
+        })?;
+
+        let buf_x = self.create_buffer(n * 4, GpuBufferUsage::STORAGE)?;
+        let buf_w = self.create_buffer(n * 4, GpuBufferUsage::STORAGE)?;
+        let buf_out = self.create_buffer(n * 4, GpuBufferUsage::STORAGE)?;
+
+        self.dispatch(&pipeline, (1, 1, 1), &[&buf_x, &buf_w, &buf_out])?;
+
+        if self.backend == GpuBackendKind::Mock {
+            unsafe {
+                zero_simd::rms_norm(n, x.as_ptr(), weight.as_ptr(), out.as_mut_ptr(), eps);
+            }
+        }
+        self.synchronize()?;
         Ok(())
     }
 }
@@ -272,5 +374,25 @@ mod tests {
         assert_eq!(pipeline.entry_point(), "main");
         dev.dispatch(&pipeline, (4, 1, 1), &[&buf]).unwrap();
         dev.synchronize().unwrap();
+    }
+
+    #[test]
+    fn test_wgsl_gemm_and_rmsnorm_execution() {
+        let dev = GpuDevice::new_mock();
+        let a = [1.0f32, 2.0, 3.0, 4.0];
+        let b = [5.0f32, 6.0, 7.0, 8.0];
+        let mut c = [0.0f32; 4];
+
+        dev.execute_gemm_f32(2, 2, 2, 1.0, &a, &b, 0.0, &mut c).unwrap();
+        assert!((c[0] - 19.0).abs() < 1e-4);
+        assert!((c[1] - 22.0).abs() < 1e-4);
+        assert!((c[2] - 43.0).abs() < 1e-4);
+        assert!((c[3] - 50.0).abs() < 1e-4);
+
+        let x = [2.0f32, 2.0, 2.0, 2.0];
+        let w = [1.0f32, 1.0, 1.0, 1.0];
+        let mut norm_out = [0.0f32; 4];
+        dev.execute_rmsnorm_f32(&x, &w, 1e-5, &mut norm_out).unwrap();
+        assert!((norm_out[0] - 1.0).abs() < 1e-3);
     }
 }

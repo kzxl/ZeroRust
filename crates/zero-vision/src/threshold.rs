@@ -65,14 +65,16 @@ pub fn binarize<const MAX_PIXELS: usize>(
     let h = src.height();
     *dst = ImageBuffer::new(w, h);
 
-    let (high, low) = if invert { (0, 255) } else { (255, 0) };
-
-    for y in 0..h {
-        for x in 0..w {
-            let p = src.get_pixel(x, y);
-            let out = if p > threshold { high } else { low };
-            dst.set_pixel(x, y, out);
-        }
+    let src_slice = src.as_slice();
+    let dst_slice = dst.as_mut_slice();
+    unsafe {
+        zero_simd::binarize_u8(
+            src_slice.len(),
+            src_slice.as_ptr(),
+            dst_slice.as_mut_ptr(),
+            threshold,
+            invert,
+        );
     }
 }
 

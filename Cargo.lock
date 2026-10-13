@@ -243,6 +243,7 @@ version = "0.1.0"
 dependencies = [
  "zero-core",
  "zero-dsp",
+ "zero-simd",
 ]
 
 [[package]]
@@ -265,6 +266,7 @@ version = "0.1.0"
 dependencies = [
  "libm",
  "zero-core",
+ "zero-simd",
 ]
 
 [[package]]

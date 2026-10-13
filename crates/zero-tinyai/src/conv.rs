@@ -51,10 +51,8 @@ impl<const KERNEL: usize> QuantizedConv1D<KERNEL> {
         }
 
         for i in 0..out_len {
-            let mut acc = self.bias;
-            for k in 0..KERNEL {
-                acc += (self.weights[k] as i32) * (input[i + k] as i32);
-            }
+            let dot = unsafe { zero_simd::dot_i8(KERNEL, self.weights.as_ptr(), input.as_ptr().add(i)) };
+            let acc = self.bias.saturating_add(dot);
             let mut val = requantize_i32(acc, self.multiplier, self.shift);
             if apply_relu {
                 val = relu_i8(val);

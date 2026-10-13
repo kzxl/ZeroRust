@@ -12,8 +12,10 @@ categories.workspace = true
 
 [features]
 default = ["std"]
-std = ["zero-core/std", "zero-dsp/std"]
+std = ["zero-core/std", "zero-dsp/std", "zero-simd/std"]
 
 [dependencies]
 zero-core = { path = "../zero-core", default-features = false }
 zero-dsp = { path = "../zero-dsp", default-features = false }
+zero-simd = { path = "../zero-simd", default-features = false }
+

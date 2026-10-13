@@ -17,11 +17,17 @@ pub mod attention;
 pub mod ffi;
 pub mod gemm;
 pub mod ops;
+pub mod paged_attention;
 pub mod quant;
+pub mod transformer;
 
 pub use attention::flash_attention_f32;
 #[cfg(feature = "ffi")]
 pub use ffi::*;
 pub use gemm::gemm_f32;
 pub use ops::*;
+pub use paged_attention::paged_attention_f32;
 pub use quant::{gemv_fp8, gemv_q4_0, gemv_q4_k, gemv_q8_0};
+#[cfg(feature = "std")]
+pub use transformer::{transformer_layer_f32, transformer_layer_q4_0};
+

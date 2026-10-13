@@ -1,7 +1,11 @@
-//! High-performance SIMD quantization microkernels (Q4_0, Q8_0).
+//! High-performance SIMD quantization microkernels (Q4_0, Q8_0, Q4_K, FP8).
+//! Supports x86_64 (AVX2+FMA) and ARM64 (NEON).
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+use core::arch::aarch64::*;
 
 pub const QK4_0: usize = 32;
 pub const QK8_0: usize = 32;
@@ -53,6 +57,12 @@ pub unsafe fn compute_q4_0_row(
             return;
         }
     }
+    #[cfg(target_arch = "aarch64")]
+    {
+        compute_q4_0_row_neon(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks);
+        return;
+    }
+    #[allow(unreachable_code)]
     compute_q4_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks);
 }
 
@@ -75,7 +85,110 @@ pub unsafe fn compute_q8_0_row(
             return;
         }
     }
+    #[cfg(target_arch = "aarch64")]
+    {
+        compute_q8_0_row_neon(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks);
+        return;
+    }
+    #[allow(unreachable_code)]
     compute_q8_0_row_scalar(r, ptr_weight, p_act, p_dst, row_byte_stride, num_blocks);
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn compute_q4_0_row_neon(
+    r: usize,
+    ptr_weight: *const u8,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    row_byte_stride: usize,
+    num_blocks: usize,
+) {
+    let p_row = ptr_weight.add(r * row_byte_stride);
+    let mut acc0 = vdupq_n_f32(0.0);
+    let mut acc1 = vdupq_n_f32(0.0);
+
+    for b in 0..num_blocks {
+        let p_block = p_row.add(b * 18);
+        let raw_d = (p_block as *const u16).read_unaligned();
+        let d = f16_to_f32(raw_d);
+        let vd = vdupq_n_f32(d);
+        let p_qs = p_block.add(2);
+        let p_a = p_act.add(b * 32);
+
+        for j in (0..16).step_by(4) {
+            let b0 = *p_qs.add(j);
+            let b1 = *p_qs.add(j + 1);
+            let b2 = *p_qs.add(j + 2);
+            let b3 = *p_qs.add(j + 3);
+
+            let lo = [
+                ((b0 & 0x0F) as i32 - 8) as f32,
+                ((b1 & 0x0F) as i32 - 8) as f32,
+                ((b2 & 0x0F) as i32 - 8) as f32,
+                ((b3 & 0x0F) as i32 - 8) as f32,
+            ];
+            let hi = [
+                ((b0 >> 4) as i32 - 8) as f32,
+                ((b1 >> 4) as i32 - 8) as f32,
+                ((b2 >> 4) as i32 - 8) as f32,
+                ((b3 >> 4) as i32 - 8) as f32,
+            ];
+
+            let vlo = vmulq_f32(vld1q_f32(lo.as_ptr()), vd);
+            let vhi = vmulq_f32(vld1q_f32(hi.as_ptr()), vd);
+
+            let va_lo = vld1q_f32(p_a.add(j));
+            let va_hi = vld1q_f32(p_a.add(j + 16));
+
+            acc0 = vfmaq_f32(acc0, vlo, va_lo);
+            acc1 = vfmaq_f32(acc1, vhi, va_hi);
+        }
+    }
+
+    *p_dst.add(r) = vaddvq_f32(vaddq_f32(acc0, acc1));
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+pub unsafe fn compute_q8_0_row_neon(
+    r: usize,
+    ptr_weight: *const u8,
+    p_act: *const f32,
+    p_dst: *mut f32,
+    row_byte_stride: usize,
+    num_blocks: usize,
+) {
+    let p_row = ptr_weight.add(r * row_byte_stride);
+    let mut acc0 = vdupq_n_f32(0.0);
+    let mut acc1 = vdupq_n_f32(0.0);
+
+    for b in 0..num_blocks {
+        let p_block = p_row.add(b * 34);
+        let raw_d = (p_block as *const u16).read_unaligned();
+        let d = f16_to_f32(raw_d);
+        let vd = vdupq_n_f32(d);
+        let p_qs = p_block.add(2) as *const i8;
+        let p_a = p_act.add(b * 32);
+
+        for j in (0..32).step_by(8) {
+            let q8 = vld1_s8(p_qs.add(j));
+            let q16 = vmovl_s8(q8);
+            let q32_lo = vmovl_s16(vget_low_s16(q16));
+            let q32_hi = vmovl_s16(vget_high_s16(q16));
+
+            let qf_lo = vmulq_f32(vcvtq_f32_s32(q32_lo), vd);
+            let qf_hi = vmulq_f32(vcvtq_f32_s32(q32_hi), vd);
+
+            let va_lo = vld1q_f32(p_a.add(j));
+            let va_hi = vld1q_f32(p_a.add(j + 4));
+
+            acc0 = vfmaq_f32(acc0, qf_lo, va_lo);
+            acc1 = vfmaq_f32(acc1, qf_hi, va_hi);
+        }
+    }
+
+    *p_dst.add(r) = vaddvq_f32(vaddq_f32(acc0, acc1));
 }
 
 #[cfg(target_arch = "x86_64")]

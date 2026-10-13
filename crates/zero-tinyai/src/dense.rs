@@ -43,12 +43,11 @@ impl<const IN_DIM: usize, const OUT_DIM: usize> QuantizedLinear<IN_DIM, OUT_DIM>
     }
 
     /// Evaluates the quantized forward pass with optional ReLU activation.
+    /// Accelerated via `zero-simd` hardware SIMD dot products (`dot_i8`).
     pub fn forward(&self, input: &[i8; IN_DIM], output: &mut [i8; OUT_DIM], apply_relu: bool) {
         for r in 0..OUT_DIM {
-            let mut acc: i32 = self.biases[r];
-            for c in 0..IN_DIM {
-                acc += (self.weights[r][c] as i32) * (input[c] as i32);
-            }
+            let dot = unsafe { zero_simd::dot_i8(IN_DIM, self.weights[r].as_ptr(), input.as_ptr()) };
+            let acc: i32 = self.biases[r].saturating_add(dot);
             let mut out = requantize_i32(acc, self.multiplier, self.shift);
             if apply_relu {
                 out = relu_i8(out);

@@ -1,7 +1,26 @@
 //! Hardware-intrinsic SIMD GEMM and dot-product microkernels.
+//! Supports x86_64 (AVX-512, AVX2+FMA) and ARM64 (NEON).
 
 #[cfg(target_arch = "x86_64")]
 use core::arch::x86_64::*;
+
+#[cfg(target_arch = "aarch64")]
+use core::arch::aarch64::*;
+
+/// Checks whether AVX-512F hardware SIMD acceleration is supported on the running CPU.
+#[inline(always)]
+pub fn is_avx512_supported() -> bool {
+    #[cfg(target_arch = "x86_64")]
+    {
+        #[cfg(feature = "std")]
+        {
+            if is_x86_feature_detected!("avx512f") {
+                return true;
+            }
+        }
+    }
+    false
+}
 
 /// Checks whether AVX2 and FMA hardware SIMD acceleration is supported on the running CPU.
 #[inline(always)]
@@ -18,6 +37,19 @@ pub fn is_avx2_fma_supported() -> bool {
     false
 }
 
+/// Checks whether ARM64 NEON hardware SIMD acceleration is supported on the running CPU.
+#[inline(always)]
+pub fn is_neon_supported() -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        return true;
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        false
+    }
+}
+
 /// Evaluates high-performance FP32 vector dot product: sum(a[i] * b[i]).
 ///
 /// # Safety
@@ -25,8 +57,18 @@ pub fn is_avx2_fma_supported() -> bool {
 pub unsafe fn dot_f32(n: usize, a: *const f32, b: *const f32) -> f32 {
     #[cfg(target_arch = "x86_64")]
     {
+        if is_avx512_supported() && n >= 16 {
+            return dot_f32_avx512(n, a, b);
+        }
         if is_avx2_fma_supported() && n >= 8 {
             return dot_f32_avx2(n, a, b);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 4 {
+            return dot_f32_neon(n, a, b);
         }
     }
 
@@ -35,6 +77,156 @@ pub unsafe fn dot_f32(n: usize, a: *const f32, b: *const f32) -> f32 {
         sum += *a.add(i) * *b.add(i);
     }
     sum
+}
+
+/// Evaluates high-performance Int8 vector dot product with Int32 accumulation: sum(a[i] * b[i]).
+///
+/// # Safety
+/// Pointers `a` and `b` must point to valid allocations of length `n`.
+pub unsafe fn dot_i8(n: usize, a: *const i8, b: *const i8) -> i32 {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_supported() && n >= 16 {
+            return dot_i8_avx2(n, a, b);
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 8 {
+            return dot_i8_neon(n, a, b);
+        }
+    }
+
+    let mut sum = 0i32;
+    for i in 0..n {
+        sum += (*a.add(i) as i32) * (*b.add(i) as i32);
+    }
+    sum
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn dot_i8_avx2(n: usize, a: *const i8, b: *const i8) -> i32 {
+    let mut acc = _mm256_setzero_si256();
+    let mut i = 0;
+
+    while i + 16 <= n {
+        let va8 = _mm_loadu_si128(a.add(i) as *const __m128i);
+        let vb8 = _mm_loadu_si128(b.add(i) as *const __m128i);
+        let va16 = _mm256_cvtepi8_epi16(va8);
+        let vb16 = _mm256_cvtepi8_epi16(vb8);
+        // _mm256_madd_epi16 multiplies adjacent i16 pairs and sums them into i32
+        let prod32 = _mm256_madd_epi16(va16, vb16);
+        acc = _mm256_add_epi32(acc, prod32);
+        i += 16;
+    }
+
+    let mut buf = [0i32; 8];
+    _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, acc);
+    let mut total = buf[0] + buf[1] + buf[2] + buf[3] + buf[4] + buf[5] + buf[6] + buf[7];
+
+    while i < n {
+        total += (*a.add(i) as i32) * (*b.add(i) as i32);
+        i += 1;
+    }
+    total
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn dot_i8_neon(n: usize, a: *const i8, b: *const i8) -> i32 {
+    let mut acc = vdupq_n_s32(0);
+    let mut i = 0;
+
+    while i + 8 <= n {
+        let va = vld1_s8(a.add(i));
+        let vb = vld1_s8(b.add(i));
+        let prod16 = vmull_s8(va, vb);
+        acc = vpadalq_s16(acc, prod16);
+        i += 8;
+    }
+
+    let mut total = vaddvq_s32(acc);
+    while i < n {
+        total += (*a.add(i) as i32) * (*b.add(i) as i32);
+        i += 1;
+    }
+    total
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx512f")]
+unsafe fn dot_f32_avx512(n: usize, a: *const f32, b: *const f32) -> f32 {
+    let mut acc0 = _mm512_setzero_ps();
+    let mut acc1 = _mm512_setzero_ps();
+    let mut i = 0;
+
+    while i + 32 <= n {
+        let va0 = _mm512_loadu_ps(a.add(i));
+        let vb0 = _mm512_loadu_ps(b.add(i));
+        acc0 = _mm512_fmadd_ps(va0, vb0, acc0);
+
+        let va1 = _mm512_loadu_ps(a.add(i + 16));
+        let vb1 = _mm512_loadu_ps(b.add(i + 16));
+        acc1 = _mm512_fmadd_ps(va1, vb1, acc1);
+
+        i += 32;
+    }
+
+    if i + 16 <= n {
+        let va = _mm512_loadu_ps(a.add(i));
+        let vb = _mm512_loadu_ps(b.add(i));
+        acc0 = _mm512_fmadd_ps(va, vb, acc0);
+        i += 16;
+    }
+
+    let acc = _mm512_add_ps(acc0, acc1);
+    let mut total = _mm512_reduce_add_ps(acc);
+
+    while i < n {
+        total += *a.add(i) * *b.add(i);
+        i += 1;
+    }
+
+    total
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn dot_f32_neon(n: usize, a: *const f32, b: *const f32) -> f32 {
+    let mut acc0 = vdupq_n_f32(0.0);
+    let mut acc1 = vdupq_n_f32(0.0);
+    let mut i = 0;
+
+    while i + 8 <= n {
+        let va0 = vld1q_f32(a.add(i));
+        let vb0 = vld1q_f32(b.add(i));
+        acc0 = vfmaq_f32(acc0, va0, vb0);
+
+        let va1 = vld1q_f32(a.add(i + 4));
+        let vb1 = vld1q_f32(b.add(i + 4));
+        acc1 = vfmaq_f32(acc1, va1, vb1);
+
+        i += 8;
+    }
+
+    if i + 4 <= n {
+        let va = vld1q_f32(a.add(i));
+        let vb = vld1q_f32(b.add(i));
+        acc0 = vfmaq_f32(acc0, va, vb);
+        i += 4;
+    }
+
+    let acc = vaddq_f32(acc0, acc1);
+    let mut total = vaddvq_f32(acc);
+
+    while i < n {
+        total += *a.add(i) * *b.add(i);
+        i += 1;
+    }
+
+    total
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -107,6 +299,16 @@ pub unsafe fn gemm_serial_range(
         }
     }
 
+    #[cfg(target_arch = "aarch64")]
+    {
+        if csb == 1 && csc == 1 {
+            gemm_range_neon(
+                m_start, m_end, n, k, alpha, a, rsa, csa, b, rsb, beta, c, rsc,
+            );
+            return;
+        }
+    }
+
     // Scalar fallback
     for i in m_start..m_end {
         let p_a = a.offset(i as isize * rsa);
@@ -123,6 +325,71 @@ pub unsafe fn gemm_serial_range(
             } else {
                 *ptr_c = alpha * sum + beta * *ptr_c;
             }
+        }
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn gemm_range_neon(
+    m_start: usize,
+    m_end: usize,
+    n: usize,
+    k: usize,
+    alpha: f32,
+    a: *const f32,
+    rsa: isize,
+    csa: isize,
+    b: *const f32,
+    rsb: isize,
+    beta: f32,
+    c: *mut f32,
+    rsc: isize,
+) {
+    for i in m_start..m_end {
+        let p_a = a.offset(i as isize * rsa);
+        let p_c = c.offset(i as isize * rsc);
+        let mut j = 0;
+
+        while j + 8 <= n {
+            let mut c0 = vdupq_n_f32(0.0);
+            let mut c1 = vdupq_n_f32(0.0);
+
+            for p in 0..k {
+                let p_bp = b.offset(p as isize * rsb + j as isize);
+                let vb0 = vld1q_f32(p_bp);
+                let vb1 = vld1q_f32(p_bp.add(4));
+                let va = vdupq_n_f32(*p_a.offset(p as isize * csa));
+                c0 = vfmaq_f32(c0, va, vb0);
+                c1 = vfmaq_f32(c1, va, vb1);
+            }
+
+            if alpha != 1.0 {
+                let v_alpha = vdupq_n_f32(alpha);
+                c0 = vmulq_f32(c0, v_alpha);
+                c1 = vmulq_f32(c1, v_alpha);
+            }
+
+            if beta == 0.0 {
+                vst1q_f32(p_c.add(j), c0);
+                vst1q_f32(p_c.add(j + 4), c1);
+            } else {
+                let v_beta = vdupq_n_f32(beta);
+                let orig0 = vmulq_f32(vld1q_f32(p_c.add(j)), v_beta);
+                let orig1 = vmulq_f32(vld1q_f32(p_c.add(j + 4)), v_beta);
+                vst1q_f32(p_c.add(j), vaddq_f32(c0, orig0));
+                vst1q_f32(p_c.add(j + 4), vaddq_f32(c1, orig1));
+            }
+            j += 8;
+        }
+
+        while j < n {
+            let mut sum = 0.0f32;
+            for p in 0..k {
+                sum += *p_a.offset(p as isize * csa) * *b.offset(p as isize * rsb + j as isize);
+            }
+            update_c(p_c.add(j), sum, alpha, beta);
+            j += 1;
         }
     }
 }
@@ -373,3 +640,79 @@ unsafe fn update_c(dst: *mut f32, sum: f32, alpha: f32, beta: f32) {
         *dst = alpha * sum + beta * *dst;
     }
 }
+
+/// Evaluates vectorized binary thresholding on 8-bit grayscale pixels.
+///
+/// # Safety
+/// Pointers `src` and `dst` must point to valid allocations of length `n`.
+pub unsafe fn binarize_u8(n: usize, src: *const u8, dst: *mut u8, threshold: u8, invert: bool) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_avx2_fma_supported() && n >= 32 {
+            binarize_u8_avx2(n, src, dst, threshold, invert);
+            return;
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        if n >= 16 {
+            binarize_u8_neon(n, src, dst, threshold, invert);
+            return;
+        }
+    }
+
+    let (high, low) = if invert { (0u8, 255u8) } else { (255u8, 0u8) };
+    for i in 0..n {
+        *dst.add(i) = if *src.add(i) > threshold { high } else { low };
+    }
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn binarize_u8_avx2(n: usize, src: *const u8, dst: *mut u8, threshold: u8, invert: bool) {
+    // Convert unsigned comparison (a > threshold) into signed comparison ((a ^ 0x80) > (threshold ^ 0x80))
+    let sign_flip = _mm256_set1_epi8(-128i8);
+    let v_thresh = _mm256_xor_si256(_mm256_set1_epi8(threshold as i8), sign_flip);
+    let mut i = 0;
+
+    while i + 32 <= n {
+        let v_src = _mm256_loadu_si256(src.add(i) as *const __m256i);
+        let v_signed = _mm256_xor_si256(v_src, sign_flip);
+        let mask = _mm256_cmpgt_epi8(v_signed, v_thresh);
+        let out = if invert {
+            _mm256_andnot_si256(mask, _mm256_set1_epi8(-1i8))
+        } else {
+            mask
+        };
+        _mm256_storeu_si256(dst.add(i) as *mut __m256i, out);
+        i += 32;
+    }
+
+    let (high, low) = if invert { (0u8, 255u8) } else { (255u8, 0u8) };
+    while i < n {
+        *dst.add(i) = if *src.add(i) > threshold { high } else { low };
+        i += 1;
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn binarize_u8_neon(n: usize, src: *const u8, dst: *mut u8, threshold: u8, invert: bool) {
+    let v_thresh = vdupq_n_u8(threshold);
+    let mut i = 0;
+
+    while i + 16 <= n {
+        let v_src = vld1q_u8(src.add(i));
+        let mask = vcgtq_u8(v_src, v_thresh);
+        let out = if invert { vmvnq_u8(mask) } else { mask };
+        vst1q_u8(dst.add(i), out);
+        i += 16;
+    }
+
+    let (high, low) = if invert { (0u8, 255u8) } else { (255u8, 0u8) };
+    while i < n {
+        *dst.add(i) = if *src.add(i) > threshold { high } else { low };
+        i += 1;
+    }
+}
+
