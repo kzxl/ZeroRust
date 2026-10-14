@@ -813,12 +813,14 @@ fn ascii_lower(b: u8) -> u8 {
     }
 }
 
-fn extract_fnv64_token_set(bytes: &[u8], out_hashes: &mut [u64; 512]) -> usize {
-    let mut count = 0usize;
+const MAX_TOKEN_HASHES: usize = 2048;
+
+fn extract_fnv64_token_set(bytes: &[u8], out_hashes: &mut [u64; MAX_TOKEN_HASHES]) -> usize {
+    let mut raw_count = 0usize;
     let mut i = 0usize;
     let len = bytes.len();
 
-    while i < len {
+    while i < len && raw_count < MAX_TOKEN_HASHES {
         while i < len && !is_token_byte(bytes[i]) {
             i += 1;
         }
@@ -832,25 +834,32 @@ fn extract_fnv64_token_set(bytes: &[u8], out_hashes: &mut [u64; 512]) -> usize {
             hash = hash.wrapping_mul(0x100000001b3);
             i += 1;
         }
-        if i - start >= 1 && count < 512 {
-            let mut exists = false;
-            for k in 0..count {
-                if out_hashes[k] == hash {
-                    exists = true;
-                    break;
-                }
-            }
-            if !exists {
-                out_hashes[count] = hash;
-                count += 1;
-            }
+        if i - start >= 1 {
+            out_hashes[raw_count] = hash;
+            raw_count += 1;
         }
     }
-    count
+
+    if raw_count <= 1 {
+        return raw_count;
+    }
+
+    // Sort in-place and deduplicate in O(N log N) instead of O(N^2)
+    let slice = &mut out_hashes[..raw_count];
+    slice.sort_unstable();
+    let mut write_idx = 1usize;
+    for read_idx in 1..raw_count {
+        if slice[read_idx] != slice[write_idx - 1] {
+            slice[write_idx] = slice[read_idx];
+            write_idx += 1;
+        }
+    }
+    write_idx
 }
 
 /// Evaluates zero-allocation FNV-1a 64-bit token set Jaccard similarity (`|A ∩ B| / |A ∪ B|`)
-/// and Recall overlap (`|A ∩ B| / |A|`) over two UTF-8 byte slices.
+/// and Recall overlap (`|A ∩ B| / |A|`) over two UTF-8 byte slices using O(N log N) sort
+/// and O(N_A + N_B) two-pointer merge intersection (up to 2048 unique tokens per slice).
 ///
 /// # Safety
 /// Pointers `a_ptr`, `b_ptr`, `out_jaccard`, and `out_recall` must be valid.
@@ -871,8 +880,8 @@ pub unsafe extern "C" fn zc_jaccard_token_overlap_utf8(
         let a_slice = core::slice::from_raw_parts(a_ptr, a_len);
         let b_slice = core::slice::from_raw_parts(b_ptr, b_len);
 
-        let mut set_a = [0u64; 512];
-        let mut set_b = [0u64; 512];
+        let mut set_a = [0u64; MAX_TOKEN_HASHES];
+        let mut set_b = [0u64; MAX_TOKEN_HASHES];
         let na = extract_fnv64_token_set(a_slice, &mut set_a);
         let nb = extract_fnv64_token_set(b_slice, &mut set_b);
 
@@ -882,14 +891,21 @@ pub unsafe extern "C" fn zc_jaccard_token_overlap_utf8(
             return;
         }
 
+        // O(na + nb) two-pointer intersection on sorted unique hashes
+        let mut ia = 0usize;
+        let mut ib = 0usize;
         let mut inter = 0usize;
-        for ia in 0..na {
+        while ia < na && ib < nb {
             let ha = set_a[ia];
-            for ib in 0..nb {
-                if ha == set_b[ib] {
-                    inter += 1;
-                    break;
-                }
+            let hb = set_b[ib];
+            if ha == hb {
+                inter += 1;
+                ia += 1;
+                ib += 1;
+            } else if ha < hb {
+                ia += 1;
+            } else {
+                ib += 1;
             }
         }
 
