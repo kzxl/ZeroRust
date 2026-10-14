@@ -356,6 +356,58 @@ int32_t zc_dot_i8(
     int32_t* out
 );
 
+/**
+ * @brief Evaluates high-performance FP32 dot product using AVX-512 / AVX2+FMA / NEON.
+ */
+int32_t zc_dot_f32(
+    size_t n,
+    const float* a,
+    const float* b,
+    float* out
+);
+
+/**
+ * @brief Evaluates FP32 Cosine Similarity between two vectors `a` and `b` of length `n`.
+ */
+int32_t zc_cosine_similarity_f32(
+    size_t n,
+    const float* a,
+    const float* b,
+    float* out
+);
+
+/**
+ * @brief Normalizes an FP32 vector `x` in-place to unit L2 norm.
+ */
+int32_t zc_l2_normalize_f32(
+    size_t n,
+    float* x,
+    float* out_norm
+);
+
+/**
+ * @brief Evaluates batch dot-product / cosine similarity between `[n_rows, dim]` matrix and `query`.
+ */
+int32_t zc_batch_dot_f32(
+    size_t n_rows,
+    size_t dim,
+    const float* matrix,
+    const float* query,
+    float* out_scores
+);
+
+/**
+ * @brief Evaluates zero-allocation 64-bit FNV-1a token set Jaccard similarity and Recall over UTF-8 slices.
+ */
+int32_t zc_jaccard_token_overlap_utf8(
+    const uint8_t* a_ptr,
+    size_t a_len,
+    const uint8_t* b_ptr,
+    size_t b_len,
+    float* out_jaccard,
+    float* out_recall
+);
+
 
 /* ========================================================================= */
 /* Backward Compatibility Aliases for zerorust_*                             */

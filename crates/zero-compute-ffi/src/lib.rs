@@ -668,3 +668,244 @@ pub unsafe extern "C" fn zc_dot_i8(n: usize, a: *const i8, b: *const i8, out: *m
     }
 }
 
+// ============================================================================
+// Vector Similarity, Batch Retrieval & Token Overlap (AI / RAG / ZFlow Kernels)
+// ============================================================================
+
+/// Evaluates high-performance FP32 dot product using AVX-512 / AVX2+FMA / NEON.
+///
+/// # Safety
+/// Pointers `a`, `b`, and `out` must point to valid allocations of length `n`.
+#[no_mangle]
+pub unsafe extern "C" fn zc_dot_f32(n: usize, a: *const f32, b: *const f32, out: *mut f32) -> i32 {
+    if a.is_null() || b.is_null() || out.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        *out = zero_simd::dot_f32(n, a, b);
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Evaluates FP32 Cosine Similarity between two vectors `a` and `b` of length `n`.
+/// Automatically normalizes by `sqrt(||a||^2 * ||b||^2)` and clamps to `[-1.0, 1.0]`.
+///
+/// # Safety
+/// Pointers `a`, `b`, and `out` must point to valid allocations of length `n`.
+#[no_mangle]
+pub unsafe extern "C" fn zc_cosine_similarity_f32(
+    n: usize,
+    a: *const f32,
+    b: *const f32,
+    out: *mut f32,
+) -> i32 {
+    if a.is_null() || b.is_null() || out.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+    if n == 0 {
+        *out = 0.0;
+        return ZC_SUCCESS;
+    }
+
+    let res = catch_unwind(|| {
+        let dot = zero_simd::dot_f32(n, a, b);
+        let norm_a = zero_simd::dot_f32(n, a, a);
+        let norm_b = zero_simd::dot_f32(n, b, b);
+        let denom = (norm_a * norm_b).sqrt();
+        if denom > 1e-12 {
+            *out = (dot / denom).clamp(-1.0, 1.0);
+        } else {
+            *out = 0.0;
+        }
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Normalizes an FP32 vector `x` of length `n` in-place to unit L2 norm (`||x||_2 = 1.0`).
+/// Writes the original L2 norm to `out_norm` if non-null.
+///
+/// # Safety
+/// Pointer `x` must point to a valid mutable allocation of length `n`.
+#[no_mangle]
+pub unsafe extern "C" fn zc_l2_normalize_f32(
+    n: usize,
+    x: *mut f32,
+    out_norm: *mut f32,
+) -> i32 {
+    if x.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        let norm_sq = zero_simd::dot_f32(n, x, x);
+        let norm = norm_sq.sqrt();
+        if !out_norm.is_null() {
+            *out_norm = norm;
+        }
+        if norm > 1e-12 {
+            let inv = 1.0f32 / norm;
+            for i in 0..n {
+                *x.add(i) *= inv;
+            }
+        }
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+/// Evaluates batch dot-product / cosine similarity between a contiguous `[n_rows, dim]`
+/// matrix of L2-normalized embeddings and a `dim`-dimensional query vector.
+///
+/// # Safety
+/// `matrix` must have `n_rows * dim` elements, `query` `dim` elements, and `out_scores` `n_rows` elements.
+#[no_mangle]
+pub unsafe extern "C" fn zc_batch_dot_f32(
+    n_rows: usize,
+    dim: usize,
+    matrix: *const f32,
+    query: *const f32,
+    out_scores: *mut f32,
+) -> i32 {
+    if matrix.is_null() || query.is_null() || out_scores.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+    if dim == 0 {
+        return ZC_ERR_INVALID_DIMENSION;
+    }
+
+    let res = catch_unwind(|| {
+        for r in 0..n_rows {
+            let row_ptr = matrix.add(r * dim);
+            let score = zero_simd::dot_f32(dim, row_ptr, query).clamp(-1.0, 1.0);
+            *out_scores.add(r) = score;
+        }
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+#[inline(always)]
+fn is_token_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'+' || b == b'#' || b >= 0x80
+}
+
+#[inline(always)]
+fn ascii_lower(b: u8) -> u8 {
+    if b >= b'A' && b <= b'Z' {
+        b + 32
+    } else {
+        b
+    }
+}
+
+fn extract_fnv64_token_set(bytes: &[u8], out_hashes: &mut [u64; 512]) -> usize {
+    let mut count = 0usize;
+    let mut i = 0usize;
+    let len = bytes.len();
+
+    while i < len {
+        while i < len && !is_token_byte(bytes[i]) {
+            i += 1;
+        }
+        if i >= len {
+            break;
+        }
+        let start = i;
+        let mut hash: u64 = 0xcbf29ce484222325;
+        while i < len && is_token_byte(bytes[i]) {
+            hash ^= ascii_lower(bytes[i]) as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+            i += 1;
+        }
+        if i - start >= 1 && count < 512 {
+            let mut exists = false;
+            for k in 0..count {
+                if out_hashes[k] == hash {
+                    exists = true;
+                    break;
+                }
+            }
+            if !exists {
+                out_hashes[count] = hash;
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+/// Evaluates zero-allocation FNV-1a 64-bit token set Jaccard similarity (`|A ∩ B| / |A ∪ B|`)
+/// and Recall overlap (`|A ∩ B| / |A|`) over two UTF-8 byte slices.
+///
+/// # Safety
+/// Pointers `a_ptr`, `b_ptr`, `out_jaccard`, and `out_recall` must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn zc_jaccard_token_overlap_utf8(
+    a_ptr: *const u8,
+    a_len: usize,
+    b_ptr: *const u8,
+    b_len: usize,
+    out_jaccard: *mut f32,
+    out_recall: *mut f32,
+) -> i32 {
+    if a_ptr.is_null() || b_ptr.is_null() || out_jaccard.is_null() || out_recall.is_null() {
+        return ZC_ERR_NULL_POINTER;
+    }
+
+    let res = catch_unwind(|| {
+        let a_slice = core::slice::from_raw_parts(a_ptr, a_len);
+        let b_slice = core::slice::from_raw_parts(b_ptr, b_len);
+
+        let mut set_a = [0u64; 512];
+        let mut set_b = [0u64; 512];
+        let na = extract_fnv64_token_set(a_slice, &mut set_a);
+        let nb = extract_fnv64_token_set(b_slice, &mut set_b);
+
+        if na == 0 || nb == 0 {
+            *out_jaccard = 0.0;
+            *out_recall = 0.0;
+            return;
+        }
+
+        let mut inter = 0usize;
+        for ia in 0..na {
+            let ha = set_a[ia];
+            for ib in 0..nb {
+                if ha == set_b[ib] {
+                    inter += 1;
+                    break;
+                }
+            }
+        }
+
+        let union = na + nb - inter;
+        *out_jaccard = if union > 0 {
+            (inter as f32) / (union as f32)
+        } else {
+            0.0
+        };
+        *out_recall = (inter as f32) / (na as f32);
+    });
+
+    match res {
+        Ok(_) => ZC_SUCCESS,
+        Err(_) => ZC_ERR_PANIC,
+    }
+}
+
+

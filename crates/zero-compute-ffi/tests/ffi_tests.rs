@@ -218,3 +218,61 @@ fn test_ffi_dot_i8() {
     assert_eq!(out, 32 * 6);
 }
 
+#[test]
+fn test_ffi_cosine_batch_and_jaccard() {
+    let mut a = [3.0f32, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let b = [6.0f32, 8.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let mut cos = 0.0f32;
+    let mut norm = 0.0f32;
+
+    unsafe {
+        assert_eq!(
+            zc_cosine_similarity_f32(8, a.as_ptr(), b.as_ptr(), &mut cos),
+            ZC_SUCCESS
+        );
+        assert!((cos - 1.0).abs() < 1e-5);
+
+        assert_eq!(
+            zc_l2_normalize_f32(8, a.as_mut_ptr(), &mut norm),
+            ZC_SUCCESS
+        );
+        assert!((norm - 5.0).abs() < 1e-5);
+        assert!((a[0] - 0.6).abs() < 1e-5);
+        assert!((a[1] - 0.8).abs() < 1e-5);
+
+        // Batch dot product over 2 rows of dim 8
+        let mut matrix = [0.0f32; 16];
+        matrix[0] = 0.6;
+        matrix[1] = 0.8;
+        matrix[8] = -0.6;
+        matrix[9] = -0.8;
+        let mut scores = [0.0f32; 2];
+        assert_eq!(
+            zc_batch_dot_f32(2, 8, matrix.as_ptr(), a.as_ptr(), scores.as_mut_ptr()),
+            ZC_SUCCESS
+        );
+        assert!((scores[0] - 1.0).abs() < 1e-5);
+        assert!((scores[1] + 1.0).abs() < 1e-5);
+
+        // Jaccard & Recall UTF-8 token overlap
+        let s1 = "chính sách bảo hành c# đổi trả 30 ngày".as_bytes();
+        let s2 = "chính sách bảo hành c# trọn đời".as_bytes();
+        let mut jaccard = 0.0f32;
+        let mut recall = 0.0f32;
+        assert_eq!(
+            zc_jaccard_token_overlap_utf8(
+                s1.as_ptr(),
+                s1.len(),
+                s2.as_ptr(),
+                s2.len(),
+                &mut jaccard,
+                &mut recall
+            ),
+            ZC_SUCCESS
+        );
+        assert!(jaccard > 0.4 && jaccard < 0.7);
+        assert!((recall - (5.0 / 9.0)).abs() < 1e-4);
+    }
+}
+
+

@@ -83,6 +83,36 @@ class ZeroCompute:
         ]
         self._lib.zc_rope_f32.restype = ctypes.c_int32
 
+        # int32_t zc_cosine_similarity_f32(size_t n, const float* a, const float* b, float* out)
+        self._lib.zc_cosine_similarity_f32.argtypes = [
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float)
+        ]
+        self._lib.zc_cosine_similarity_f32.restype = ctypes.c_int32
+
+        # int32_t zc_batch_dot_f32(size_t n_rows, size_t dim, const float* matrix, const float* query, float* out_scores)
+        self._lib.zc_batch_dot_f32.argtypes = [
+            ctypes.c_size_t,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float)
+        ]
+        self._lib.zc_batch_dot_f32.restype = ctypes.c_int32
+
+        # int32_t zc_jaccard_token_overlap_utf8(const uint8_t* a_ptr, size_t a_len, const uint8_t* b_ptr, size_t b_len, float* out_jaccard, float* out_recall)
+        self._lib.zc_jaccard_token_overlap_utf8.argtypes = [
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.c_char_p,
+            ctypes.c_size_t,
+            ctypes.POINTER(ctypes.c_float),
+            ctypes.POINTER(ctypes.c_float)
+        ]
+        self._lib.zc_jaccard_token_overlap_utf8.restype = ctypes.c_int32
+
     @property
     def version(self) -> int:
         return self._lib.zc_version()
@@ -137,6 +167,39 @@ class ZeroCompute:
             raise RuntimeError(f"zc_rope_f32 failed: {status}")
         return list(c_x)
 
+    def cosine_similarity_f32(self, a: list[float], b: list[float]) -> float:
+        n = min(len(a), len(b))
+        if n == 0:
+            return 0.0
+        c_a = (ctypes.c_float * n)(*a[:n])
+        c_b = (ctypes.c_float * n)(*b[:n])
+        out = ctypes.c_float(0.0)
+        status = self._lib.zc_cosine_similarity_f32(n, c_a, c_b, ctypes.byref(out))
+        if status != 0:
+            raise RuntimeError(f"zc_cosine_similarity_f32 failed: {status}")
+        return float(out.value)
+
+    def batch_dot_f32(self, matrix_flat: list[float], query: list[float], n_rows: int, dim: int) -> list[float]:
+        c_mat = (ctypes.c_float * (n_rows * dim))(*matrix_flat)
+        c_q = (ctypes.c_float * dim)(*query)
+        c_out = (ctypes.c_float * n_rows)()
+        status = self._lib.zc_batch_dot_f32(n_rows, dim, c_mat, c_q, c_out)
+        if status != 0:
+            raise RuntimeError(f"zc_batch_dot_f32 failed: {status}")
+        return list(c_out)
+
+    def jaccard_token_overlap(self, text_a: str, text_b: str) -> tuple[float, float]:
+        b_a = (text_a or "").encode("utf-8")
+        b_b = (text_b or "").encode("utf-8")
+        out_j = ctypes.c_float(0.0)
+        out_r = ctypes.c_float(0.0)
+        status = self._lib.zc_jaccard_token_overlap_utf8(
+            b_a, len(b_a), b_b, len(b_b), ctypes.byref(out_j), ctypes.byref(out_r)
+        )
+        if status != 0:
+            raise RuntimeError(f"zc_jaccard_token_overlap_utf8 failed: {status}")
+        return float(out_j.value), float(out_r.value)
+
 
 def run_tests():
     print("=" * 60)
@@ -181,6 +244,13 @@ def run_tests():
         assert abs(orig - actual) < 1e-4
     print("    RoPE PASS")
 
+    # Cosine, Batch Dot, Jaccard
+    cos = zc.cosine_similarity_f32([0.6, 0.8, 0.0, 0.0], [0.6, 0.8, 0.0, 0.0])
+    assert abs(cos - 1.0) < 1e-5
+    j, r = zc.jaccard_token_overlap("chính sách bảo hành c#", "chính sách bảo hành c#")
+    assert abs(j - 1.0) < 1e-5 and abs(r - 1.0) < 1e-5
+    print(f"[6] Cosine & Jaccard SIMD PASS: cos={cos:.4f}, jaccard={j:.4f}")
+
     print("=" * 60)
     print(">>> ALL PYTHON CTYPES VERIFICATION TESTS PASSED! <<<")
     print("=" * 60)
@@ -188,3 +258,4 @@ def run_tests():
 
 if __name__ == "__main__":
     run_tests()
+
