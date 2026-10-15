@@ -1,0 +1,19 @@
+[package]
+name = "zero-graphics-ffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "High-performance SIMD C-ABI Graphics, Vision, SDF, and LTTB kernels for ZeroGraphics"
+keywords = ["ffi", "c-abi", "graphics", "vision", "simd"]
+categories.workspace = true
+
+[lib]
+name = "zero_graphics"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+zero-core = { path = "../zero-core" }
+zero-simd = { path = "../zero-simd" }
+zero-vision = { path = "../zero-vision" }

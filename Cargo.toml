@@ -29,6 +29,7 @@ members = [
     "crates/zero-simd",
     "crates/zero-compute",
     "crates/zero-compute-ffi",
+    "crates/zero-graphics-ffi",
 ]
 
 [workspace.package]

@@ -275,4 +275,22 @@ fn test_ffi_cosine_batch_and_jaccard() {
     }
 }
 
+#[test]
+fn test_ffi_graphics_reexports() {
+    assert_eq!(zg_version(), 100);
+    let simd = zg_is_simd_supported();
+    assert!(simd == 0 || simd == 1);
+
+    let bgra = [29u8, 150, 77, 255, 255, 255, 255, 255];
+    let mut gray = [0u8; 2];
+    unsafe {
+        assert_eq!(
+            zg_bgra32_to_gray8(bgra.as_ptr(), 8, gray.as_mut_ptr(), 2, 2, 1),
+            ZG_SUCCESS
+        );
+    }
+    assert_eq!(gray[1], 255);
+}
+
+
 

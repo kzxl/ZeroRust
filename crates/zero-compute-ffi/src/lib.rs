@@ -5,6 +5,9 @@
 
 use std::panic::catch_unwind;
 
+pub use zero_graphics as zero_graphics_ffi;
+pub use zero_graphics::*;
+
 pub const ZC_SUCCESS: i32 = 0;
 pub const ZC_ERR_NULL_POINTER: i32 = -1;
 pub const ZC_ERR_INVALID_DIMENSION: i32 = -2;

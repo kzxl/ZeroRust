@@ -108,6 +108,7 @@ version = "0.1.0"
 dependencies = [
  "zero-compute",
  "zero-core",
+ "zero-graphics-ffi",
  "zero-simd",
  "zero-tensor",
 ]
@@ -161,6 +162,15 @@ name = "zero-fastcgi"
 version = "0.1.0"
 dependencies = [
  "zero-core",
+]
+
+[[package]]
+name = "zero-graphics-ffi"
+version = "0.1.0"
+dependencies = [
+ "zero-core",
+ "zero-simd",
+ "zero-vision",
 ]
 
 [[package]]

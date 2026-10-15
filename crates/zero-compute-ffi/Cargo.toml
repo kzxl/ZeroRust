@@ -19,3 +19,4 @@ zero-core = { path = "../zero-core" }
 zero-simd = { path = "../zero-simd" }
 zero-compute = { path = "../zero-compute" }
 zero-tensor = { path = "../zero-tensor" }
+zero-graphics-ffi = { path = "../zero-graphics-ffi" }
