@@ -91,10 +91,9 @@ impl GatewayServer {
         })?;
 
         // Spawn Admin Control-Plane Server
-        let admin_metrics = Arc::clone(&self.state.metrics);
-        let admin_clusters = Arc::clone(&self.state.clusters);
+        let admin_state = Arc::clone(&self.state);
         tokio::spawn(async move {
-            run_admin_server(admin_listener, admin_metrics, admin_clusters).await;
+            run_admin_server(admin_listener, admin_state).await;
         });
 
         // Main Data-Plane Connection Accept Loop
@@ -243,50 +242,127 @@ async fn handle_client(mut stream: TcpStream, client_ip: String, state: Arc<Gate
     }
 }
 
-async fn run_admin_server(listener: TcpListener, metrics: Arc<MetricsCollector>, clusters: Arc<ClusterRegistry>) {
+async fn run_admin_server(listener: TcpListener, state: Arc<GatewayState>) {
     loop {
         if let Ok((mut stream, _)) = listener.accept().await {
-            let metrics = Arc::clone(&metrics);
-            let clusters = Arc::clone(&clusters);
+            let state = Arc::clone(&state);
             tokio::spawn(async move {
                 let mut buf = [0u8; 2048];
                 if let Ok(n) = stream.read(&mut buf).await {
                     let req_str = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                    if req_str.contains("/metrics") {
-                        let prom = metrics.to_prometheus();
-                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {}\r\n\r\n{prom}", prom.len());
+                    let first_line = req_str.lines().next().unwrap_or("");
+                    let parts: Vec<&str> = first_line.split_whitespace().collect();
+                    let method = parts.first().copied().unwrap_or("GET");
+                    let path = parts.get(1).copied().unwrap_or("/");
+
+                    if method == "OPTIONS" {
+                        let resp = "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nConnection: close\r\n\r\n";
                         let _ = stream.write_all(resp.as_bytes()).await;
-                    } else if req_str.contains("/admin/stats") {
-                        let snap = metrics.snapshot();
+                        return;
+                    }
+
+                    if path == "/metrics" {
+                        let prom = state.metrics.to_prometheus();
+                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{prom}", prom.len());
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                    } else if path == "/admin/stats" || path == "/admin/metrics" {
+                        let snap = state.metrics.snapshot();
                         let json = serde_json::to_string(&snap).unwrap_or_default();
-                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{json}", json.len());
+                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
                         let _ = stream.write_all(resp.as_bytes()).await;
-                    } else {
-                        let active_clusters = clusters.list_all();
-                        let cluster_summary: Vec<_> = active_clusters.iter().map(|c| {
+                    } else if path == "/admin/health" || path == "/health" {
+                        let active_clusters = state.clusters.list_all();
+                        let dest_list: Vec<_> = active_clusters.iter().flat_map(|c| {
+                            c.destinations.iter().map(|d| {
+                                serde_json::json!({
+                                    "address": d.address,
+                                    "clusterId": c.cluster_id,
+                                    "role": d.role,
+                                    "weight": d.weight,
+                                    "isHealthy": d.is_healthy.load(std::sync::atomic::Ordering::Relaxed),
+                                    "inFlight": d.in_flight.load(std::sync::atomic::Ordering::Relaxed),
+                                })
+                            })
+                        }).collect();
+                        let json = serde_json::json!({
+                            "status": "healthy",
+                            "engine": "ZGate Sovereign Rust Core",
+                            "gateway": {
+                                "totalRoutes": 3,
+                                "totalClusters": active_clusters.len(),
+                                "totalRequests": state.metrics.snapshot().total_requests,
+                                "avgLatencyMs": state.metrics.snapshot().latency_p50_ms,
+                            },
+                            "destinations": dest_list
+                        }).to_string();
+                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                    } else if path == "/admin/clusters" {
+                        let active_clusters = state.clusters.list_all();
+                        let cluster_list: Vec<_> = active_clusters.iter().map(|c| {
                             serde_json::json!({
                                 "cluster_id": c.cluster_id,
                                 "name": c.name,
                                 "destinations": c.destinations.iter().map(|d| {
                                     serde_json::json!({
                                         "address": d.address,
-                                        "healthy": d.is_healthy.load(std::sync::atomic::Ordering::Relaxed),
-                                        "in_flight": d.in_flight.load(std::sync::atomic::Ordering::Relaxed),
+                                        "role": d.role,
+                                        "is_healthy": d.is_healthy.load(std::sync::atomic::Ordering::Relaxed),
                                     })
                                 }).collect::<Vec<_>>()
                             })
                         }).collect();
-                        let json = serde_json::json!({
-                            "status": "online",
-                            "engine": "ZGate Sovereign Rust Core",
-                            "clusters": cluster_summary
-                        }).to_string();
-                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\n\r\n{json}", json.len());
+                        let json = serde_json::to_string(&cluster_list).unwrap_or_default();
+                        let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
                         let _ = stream.write_all(resp.as_bytes()).await;
+                    } else {
+                        // Serve embedded SPA static assets or fallback
+                        serve_static_or_spa(&mut stream, path).await;
                     }
                 }
             });
         }
+    }
+}
+
+async fn serve_static_or_spa(stream: &mut TcpStream, req_path: &str) {
+    let clean_path = req_path.split('?').next().unwrap_or(req_path);
+    let mut file_path = std::path::PathBuf::from("web/dist");
+
+    let (content_type, target_file) = if clean_path.starts_with("/assets/") {
+        let rel_file = clean_path.trim_start_matches("/assets/");
+        file_path.push("assets");
+        file_path.push(rel_file);
+        let ct = if rel_file.ends_with(".css") {
+            "text/css; charset=utf-8"
+        } else if rel_file.ends_with(".js") {
+            "application/javascript; charset=utf-8"
+        } else {
+            "application/octet-stream"
+        };
+        (ct, file_path)
+    } else if clean_path == "/vite.svg" {
+        file_path.push("vite.svg");
+        ("image/svg+xml", file_path)
+    } else {
+        file_path.push("index.html");
+        ("text/html; charset=utf-8", file_path)
+    };
+
+    if let Ok(bytes) = tokio::fs::read(&target_file).await {
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            bytes.len()
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
+        let _ = stream.write_all(&bytes).await;
+    } else {
+        let fallback = r#"<!DOCTYPE html><html><head><meta charset="utf-8"><title>ZGate Command Center</title><style>body{background:#0b0f19;color:#f8fafc;font-family:sans-serif;padding:60px 20px;text-align:center;}h1{color:#38bdf8;font-size:28px;}p{color:#94a3b8;font-size:16px;}a{color:#10b981;margin:0 12px;text-decoration:none;font-weight:600;}</style></head><body><h1>🌌 ZGate Command Center</h1><p>Sovereign Industrial Reverse Proxy & Gateway Core is ONLINE.</p><p><a href="/admin/health">/admin/health</a> | <a href="/admin/stats">/admin/stats</a> | <a href="/metrics">/metrics</a></p></body></html>"#;
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{fallback}",
+            fallback.len()
+        );
+        let _ = stream.write_all(resp.as_bytes()).await;
     }
 }
 
