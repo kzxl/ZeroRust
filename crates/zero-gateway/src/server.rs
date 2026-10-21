@@ -8,6 +8,7 @@ use crate::config::GatewayConfig;
 use crate::error::GatewayError;
 use crate::pipeline::ratelimit::RateLimiterRegistry;
 use crate::proxy::buffer_pool::BufferPool;
+use crate::proxy::pool::UpstreamConnectionPool;
 use crate::proxy::websocket::{is_websocket_upgrade, tunnel_bidirectional};
 use crate::proxy::ReverseProxy;
 use crate::routing::RouteRegistry;
@@ -17,6 +18,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::time::{timeout, Duration};
 
 /// Shared state container across all request handling tasks.
 #[derive(Clone)]
@@ -47,9 +49,11 @@ impl GatewayServer {
         let auth = Arc::new(AuthManager::new(&config.server.jwt_secret));
         let metrics = Arc::new(MetricsCollector::new());
         let buffer_pool = BufferPool::new(128, 512);
+        let conn_pool = Arc::new(UpstreamConnectionPool::new(128));
         let proxy = Arc::new(ReverseProxy::new(
             buffer_pool,
             config.server.upstream_timeout_ms,
+            conn_pool,
         ));
 
         let state = Arc::new(GatewayState {
@@ -64,7 +68,6 @@ impl GatewayServer {
         Self { config, state }
     }
 
-    /// Accessors for runtime administration and dynamic hot-reloads
     pub fn routes(&self) -> &Arc<RouteRegistry> {
         &self.state.routes
     }
@@ -110,7 +113,7 @@ impl GatewayServer {
                     });
                 }
                 Err(_) => {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
+                    tokio::time::sleep(Duration::from_millis(5)).await;
                 }
             }
         }
@@ -118,126 +121,159 @@ impl GatewayServer {
 }
 
 async fn handle_client(mut stream: TcpStream, client_ip: String, state: Arc<GatewayState>) {
-    let start_time = Instant::now();
+    let _ = stream.set_nodelay(true);
     let mut header_buf = [0u8; 8192];
-    let n = match stream.read(&mut header_buf).await {
-        Ok(n) if n > 0 => n,
-        _ => return,
-    };
+    let idle_timeout = Duration::from_secs(15);
 
-    let header_bytes = &header_buf[..n];
-    let header_str = match std::str::from_utf8(header_bytes) {
-        Ok(s) => s,
-        Err(_) => {
-            let _ = send_simple_response(&mut stream, 400, "Bad Request: Malformed UTF-8").await;
-            state.metrics.record_request(400, start_time.elapsed().as_micros() as u64);
-            return;
-        }
-    };
+    loop {
+        let start_time = Instant::now();
+        let read_res = timeout(idle_timeout, stream.read(&mut header_buf)).await;
+        let n = match read_res {
+            Ok(Ok(n)) if n > 0 => n,
+            _ => break,
+        };
 
-    let first_line = match header_str.lines().next() {
-        Some(l) => l,
-        None => return,
-    };
-
-    let parts: Vec<&str> = first_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        let _ = send_simple_response(&mut stream, 400, "Bad Request").await;
-        state.metrics.record_request(400, start_time.elapsed().as_micros() as u64);
-        return;
-    }
-
-    let path = parts[1];
-
-    // Internal health probe shortcut
-    if path == "/health" {
-        let _ = send_json_response(&mut stream, 200, r#"{"status":"healthy","engine":"zgate-rust"}"#).await;
-        state.metrics.record_request(200, start_time.elapsed().as_micros() as u64);
-        return;
-    }
-
-    // 1. Prefix Trie Route Match (O(K))
-    let route = match state.routes.match_route(path) {
-        Some(r) => r,
-        None => {
-            let _ = send_simple_response(&mut stream, 404, "404 Not Found: No route matched").await;
-            state.metrics.record_request(404, start_time.elapsed().as_micros() as u64);
-            return;
-        }
-    };
-
-    // 2. Token Bucket Rate Limiting
-    if route.rate_limit_per_second > 0
-        && !state.rate_limiters.check_allowed(&route.route_id, route.rate_limit_per_second)
-    {
-        let _ = send_simple_response(&mut stream, 429, "429 Too Many Requests").await;
-        state.metrics.record_request(429, start_time.elapsed().as_micros() as u64);
-        return;
-    }
-
-    // 3. JWT Authentication Verification
-    if route.auth_required {
-        let mut token = None;
-        for line in header_str.lines() {
-            if line.to_ascii_lowercase().starts_with("authorization:") {
-                let val = line[14..].trim();
-                token = Some(val);
+        let header_bytes = &header_buf[..n];
+        let header_str = match std::str::from_utf8(header_bytes) {
+            Ok(s) => s,
+            Err(_) => {
+                let _ = send_simple_response(&mut stream, 400, "Bad Request: Malformed UTF-8").await;
+                state.metrics.record_request(400, start_time.elapsed().as_micros() as u64);
                 break;
             }
+        };
+
+        let first_line = match header_str.lines().next() {
+            Some(l) => l,
+            None => break,
+        };
+
+        let parts: Vec<&str> = first_line.split_whitespace().collect();
+        if parts.len() < 2 {
+            let _ = send_simple_response(&mut stream, 400, "Bad Request").await;
+            state.metrics.record_request(400, start_time.elapsed().as_micros() as u64);
+            break;
         }
 
-        match token {
-            Some(t) => {
-                if let Err(e) = state.auth.verify_token(t) {
-                    let _ = send_simple_response(&mut stream, 401, &format!("401 Unauthorized: {e}")).await;
-                    state.metrics.record_request(401, start_time.elapsed().as_micros() as u64);
-                    return;
+        let path = parts[1];
+        let header_lower = header_str.to_ascii_lowercase();
+        let is_close_requested = header_lower.contains("connection: close");
+
+        // Internal health probe shortcut
+        if path == "/health" {
+            let _ = send_json_response(&mut stream, 200, r#"{"status":"healthy","engine":"zgate-rust"}"#).await;
+            state.metrics.record_request(200, start_time.elapsed().as_micros() as u64);
+            if is_close_requested {
+                break;
+            }
+            continue;
+        }
+
+        // 1. Prefix Trie Route Match (O(K))
+        let route = match state.routes.match_route(path) {
+            Some(r) => r,
+            None => {
+                let _ = send_simple_response(&mut stream, 404, "404 Not Found: No route matched").await;
+                state.metrics.record_request(404, start_time.elapsed().as_micros() as u64);
+                if is_close_requested {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        // 2. Token Bucket Rate Limiting
+        if route.rate_limit_per_second > 0
+            && !state.rate_limiters.check_allowed(&route.route_id, route.rate_limit_per_second)
+        {
+            let _ = send_simple_response(&mut stream, 429, "429 Too Many Requests").await;
+            state.metrics.record_request(429, start_time.elapsed().as_micros() as u64);
+            if is_close_requested {
+                break;
+            }
+            continue;
+        }
+
+        // 3. JWT Authentication Verification
+        if route.auth_required {
+            let mut token = None;
+            for line in header_str.lines() {
+                if line.to_ascii_lowercase().starts_with("authorization:") {
+                    let val = line[14..].trim();
+                    token = Some(val);
+                    break;
                 }
             }
+
+            match token {
+                Some(t) => {
+                    if let Err(e) = state.auth.verify_token(t) {
+                        let _ = send_simple_response(&mut stream, 401, &format!("401 Unauthorized: {e}")).await;
+                        state.metrics.record_request(401, start_time.elapsed().as_micros() as u64);
+                        if is_close_requested {
+                            break;
+                        }
+                        continue;
+                    }
+                }
+                None => {
+                    let _ = send_simple_response(&mut stream, 401, "401 Unauthorized: Missing Token").await;
+                    state.metrics.record_request(401, start_time.elapsed().as_micros() as u64);
+                    if is_close_requested {
+                        break;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // 4. Cluster & Destination Selection
+        let cluster = match state.clusters.get(&route.cluster_id) {
+            Some(c) => c,
             None => {
-                let _ = send_simple_response(&mut stream, 401, "401 Unauthorized: Missing Token").await;
-                state.metrics.record_request(401, start_time.elapsed().as_micros() as u64);
-                return;
-            }
-        }
-    }
-
-    // 4. Cluster & Destination Selection
-    let cluster = match state.clusters.get(&route.cluster_id) {
-        Some(c) => c,
-        None => {
-            let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: Cluster not found").await;
-            state.metrics.record_request(502, start_time.elapsed().as_micros() as u64);
-            return;
-        }
-    };
-
-    let destination = match cluster.select_destination() {
-        Some(d) => d,
-        None => {
-            let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: No healthy upstream").await;
-            state.metrics.record_request(502, start_time.elapsed().as_micros() as u64);
-            return;
-        }
-    };
-
-    // 5. WebSocket Tunneling vs L7 HTTP Forwarding
-    let header_lower = header_str.to_ascii_lowercase();
-    if is_websocket_upgrade(&header_lower) {
-        let raw_addr = destination.address.trim_start_matches("http://").trim_start_matches("https://");
-        if let Ok(upstream) = TcpStream::connect(raw_addr).await {
-            let _ = tunnel_bidirectional(stream, upstream).await;
-            state.metrics.record_request(101, start_time.elapsed().as_micros() as u64);
-        }
-    } else {
-        match state.proxy.forward(&mut stream, &destination, &route, header_bytes, &client_ip).await {
-            Ok(status) => {
-                state.metrics.record_request(status, start_time.elapsed().as_micros() as u64);
-            }
-            Err(_) => {
-                let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: Upstream failure").await;
+                let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: Cluster not found").await;
                 state.metrics.record_request(502, start_time.elapsed().as_micros() as u64);
+                if is_close_requested {
+                    break;
+                }
+                continue;
             }
+        };
+
+        let destination = match cluster.select_destination() {
+            Some(d) => d,
+            None => {
+                let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: No healthy upstream").await;
+                state.metrics.record_request(502, start_time.elapsed().as_micros() as u64);
+                if is_close_requested {
+                    break;
+                }
+                continue;
+            }
+        };
+
+        // 5. WebSocket Tunneling vs L7 HTTP Forwarding
+        if is_websocket_upgrade(&header_lower) {
+            let raw_addr = destination.address.trim_start_matches("http://").trim_start_matches("https://");
+            if let Ok(upstream) = TcpStream::connect(raw_addr).await {
+                let _ = tunnel_bidirectional(stream, upstream).await;
+                state.metrics.record_request(101, start_time.elapsed().as_micros() as u64);
+            }
+            break; // WebSocket takes over the socket entirely
+        } else {
+            match state.proxy.forward(&mut stream, &destination, &route, header_bytes, &client_ip).await {
+                Ok(status) => {
+                    state.metrics.record_request(status, start_time.elapsed().as_micros() as u64);
+                }
+                Err(_) => {
+                    let _ = send_simple_response(&mut stream, 502, "502 Bad Gateway: Upstream failure").await;
+                    state.metrics.record_request(502, start_time.elapsed().as_micros() as u64);
+                }
+            }
+        }
+
+        if is_close_requested {
+            break;
         }
     }
 }
@@ -312,11 +348,13 @@ async fn run_admin_server(listener: TcpListener, state: Arc<GatewayState>) {
                                 }).collect::<Vec<_>>()
                             })
                         }).collect();
-                        let json = serde_json::to_string(&cluster_list).unwrap_or_default();
+                        let json = serde_json::json!({
+                            "cluster_id": "root",
+                            "clusters": cluster_list
+                        }).to_string();
                         let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
                         let _ = stream.write_all(resp.as_bytes()).await;
                     } else {
-                        // Serve embedded SPA static assets or fallback
                         serve_static_or_spa(&mut stream, path).await;
                     }
                 }
@@ -368,11 +406,11 @@ async fn serve_static_or_spa(stream: &mut TcpStream, req_path: &str) {
 
 async fn send_simple_response(stream: &mut TcpStream, code: u16, msg: &str) -> Result<(), std::io::Error> {
     let body = format!("{msg}\r\n");
-    let resp = format!("HTTP/1.1 {code} Status\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let resp = format!("HTTP/1.1 {code} Status\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{body}", body.len());
     stream.write_all(resp.as_bytes()).await
 }
 
 async fn send_json_response(stream: &mut TcpStream, code: u16, json: &str) -> Result<(), std::io::Error> {
-    let resp = format!("HTTP/1.1 {code} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
+    let resp = format!("HTTP/1.1 {code} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: keep-alive\r\n\r\n{json}", json.len());
     stream.write_all(resp.as_bytes()).await
 }

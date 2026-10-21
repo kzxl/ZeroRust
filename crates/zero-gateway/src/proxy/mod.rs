@@ -3,9 +3,11 @@
 //! Sub-millisecond stream forwarding utilizing aligned buffer pools and connection multiplexing.
 
 pub mod buffer_pool;
+pub mod pool;
 pub mod websocket;
 
 use buffer_pool::BufferPool;
+use pool::UpstreamConnectionPool;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -20,13 +22,19 @@ use crate::routing::rule::RouteRule;
 pub struct ReverseProxy {
     buffer_pool: Arc<BufferPool>,
     timeout_duration: Duration,
+    pool: Arc<UpstreamConnectionPool>,
 }
 
 impl ReverseProxy {
-    pub fn new(buffer_pool: Arc<BufferPool>, timeout_ms: u64) -> Self {
+    pub fn new(
+        buffer_pool: Arc<BufferPool>,
+        timeout_ms: u64,
+        pool: Arc<UpstreamConnectionPool>,
+    ) -> Self {
         Self {
             buffer_pool,
             timeout_duration: Duration::from_millis(timeout_ms.max(1000)),
+            pool,
         }
     }
 
@@ -47,20 +55,28 @@ impl ReverseProxy {
             .trim_start_matches("http://")
             .trim_start_matches("https://");
 
-        // Connect to upstream with timeout
-        let upstream_conn = timeout(Duration::from_millis(3000), TcpStream::connect(host_port)).await;
-        let mut upstream = match upstream_conn {
-            Ok(Ok(stream)) => stream,
-            Ok(Err(e)) => {
-                destination.record_finish(false, start_time.elapsed().as_micros() as u64);
-                return Err(GatewayError::UpstreamConnectionFailed {
-                    address: destination.address.clone(),
-                    details: e.to_string(),
-                });
-            }
-            Err(_) => {
-                destination.record_finish(false, start_time.elapsed().as_micros() as u64);
-                return Err(GatewayError::UpstreamTimeout { timeout_ms: 3000 });
+        // Acquire warm connection from pool or establish new TCP stream
+        let mut upstream = match self.pool.acquire(host_port).await {
+            Some(s) => s,
+            None => {
+                let conn_res = timeout(Duration::from_millis(3000), TcpStream::connect(host_port)).await;
+                match conn_res {
+                    Ok(Ok(stream)) => {
+                        let _ = stream.set_nodelay(true);
+                        stream
+                    }
+                    Ok(Err(e)) => {
+                        destination.record_finish(false, start_time.elapsed().as_micros() as u64);
+                        return Err(GatewayError::UpstreamConnectionFailed {
+                            address: destination.address.clone(),
+                            details: e.to_string(),
+                        });
+                    }
+                    Err(_) => {
+                        destination.record_finish(false, start_time.elapsed().as_micros() as u64);
+                        return Err(GatewayError::UpstreamTimeout { timeout_ms: 3000 });
+                    }
+                }
             }
         };
 
@@ -113,14 +129,14 @@ impl ReverseProxy {
             if line_lower.starts_with("host:") {
                 forward_headers.push_str(&format!("Host: {host_port}\r\n"));
             } else if line_lower.starts_with("connection:") {
-                // Strip client connection hop-by-hop header
+                // Strip client connection header
             } else {
                 forward_headers.push_str(line);
                 forward_headers.push_str("\r\n");
             }
         }
 
-        forward_headers.push_str("Connection: close\r\n");
+        forward_headers.push_str("Connection: keep-alive\r\n");
         forward_headers.push_str(&format!("X-Forwarded-For: {client_ip}\r\n"));
         forward_headers.push_str(&format!("X-Gateway-RouteId: {}\r\n", route.route_id));
         forward_headers.push_str(&format!("X-Gateway-ClusterId: {}\r\n\r\n", route.cluster_id));
@@ -139,11 +155,15 @@ impl ReverseProxy {
         let mut total_expected: Option<usize> = None;
         let mut total_received: usize = 0;
         let mut first_chunk = true;
+        let mut can_reuse = true;
 
         loop {
             let read_res = timeout(self.timeout_duration, upstream.read(&mut buffer[..])).await;
             match read_res {
-                Ok(Ok(0)) => break, // EOF
+                Ok(Ok(0)) => {
+                    can_reuse = false;
+                    break;
+                }
                 Ok(Ok(n)) => {
                     total_received += n;
                     if first_chunk {
@@ -154,13 +174,15 @@ impl ReverseProxy {
                             }
                             if let Some(hdr_end) = first_str.find("\r\n\r\n") {
                                 for hdr_line in first_str[..hdr_end].lines() {
-                                    if hdr_line.to_ascii_lowercase().starts_with("content-length:") {
+                                    let l_low = hdr_line.to_ascii_lowercase();
+                                    if l_low.starts_with("content-length:") {
                                         if let Some(len_str) = hdr_line.split(':').nth(1) {
                                             if let Ok(cl) = len_str.trim().parse::<usize>() {
                                                 total_expected = Some(hdr_end + 4 + cl);
                                             }
                                         }
-                                        break;
+                                    } else if l_low.contains("connection: close") {
+                                        can_reuse = false;
                                     }
                                 }
                             }
@@ -193,6 +215,11 @@ impl ReverseProxy {
                     });
                 }
             }
+        }
+
+        // Return warm connection back to pool if reusable
+        if can_reuse && total_expected.is_some() {
+            self.pool.release(host_port.to_string(), upstream).await;
         }
 
         destination.record_finish(status_code < 500, start_time.elapsed().as_micros() as u64);
