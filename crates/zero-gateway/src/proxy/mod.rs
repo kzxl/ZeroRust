@@ -109,15 +109,18 @@ impl ReverseProxy {
             if line.is_empty() {
                 break;
             }
-            // Strip client hop-by-hop Host or override
-            if line.to_ascii_lowercase().starts_with("host:") {
+            let line_lower = line.to_ascii_lowercase();
+            if line_lower.starts_with("host:") {
                 forward_headers.push_str(&format!("Host: {host_port}\r\n"));
+            } else if line_lower.starts_with("connection:") {
+                // Strip client connection hop-by-hop header
             } else {
                 forward_headers.push_str(line);
                 forward_headers.push_str("\r\n");
             }
         }
 
+        forward_headers.push_str("Connection: close\r\n");
         forward_headers.push_str(&format!("X-Forwarded-For: {client_ip}\r\n"));
         forward_headers.push_str(&format!("X-Gateway-RouteId: {}\r\n", route.route_id));
         forward_headers.push_str(&format!("X-Gateway-ClusterId: {}\r\n\r\n", route.cluster_id));
@@ -133,6 +136,8 @@ impl ReverseProxy {
         // Stream response from upstream back to client using pool buffer
         let mut buffer = self.buffer_pool.acquire();
         let mut status_code: u16 = 200;
+        let mut total_expected: Option<usize> = None;
+        let mut total_received: usize = 0;
         let mut first_chunk = true;
 
         loop {
@@ -140,19 +145,39 @@ impl ReverseProxy {
             match read_res {
                 Ok(Ok(0)) => break, // EOF
                 Ok(Ok(n)) => {
+                    total_received += n;
                     if first_chunk {
                         first_chunk = false;
-                        if let Ok(first_str) = std::str::from_utf8(&buffer[..n.min(64)]) {
+                        if let Ok(first_str) = std::str::from_utf8(&buffer[..n]) {
                             if let Some(status_str) = first_str.split_whitespace().nth(1) {
                                 status_code = status_str.parse::<u16>().unwrap_or(200);
                             }
+                            if let Some(hdr_end) = first_str.find("\r\n\r\n") {
+                                for hdr_line in first_str[..hdr_end].lines() {
+                                    if hdr_line.to_ascii_lowercase().starts_with("content-length:") {
+                                        if let Some(len_str) = hdr_line.split(':').nth(1) {
+                                            if let Ok(cl) = len_str.trim().parse::<usize>() {
+                                                total_expected = Some(hdr_end + 4 + cl);
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
                         }
                     }
+
                     if let Err(e) = client_stream.write_all(&buffer[..n]).await {
                         destination.record_finish(false, start_time.elapsed().as_micros() as u64);
                         return Err(GatewayError::IoFailure {
                             details: format!("Failed to write to client: {e}"),
                         });
+                    }
+
+                    if let Some(expected) = total_expected {
+                        if total_received >= expected {
+                            break;
+                        }
                     }
                 }
                 Ok(Err(e)) => {
