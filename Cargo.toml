@@ -30,6 +30,7 @@ members = [
     "crates/zero-compute",
     "crates/zero-compute-ffi",
     "crates/zero-graphics-ffi",
+    "crates/zero-gateway",
 ]
 
 [workspace.package]
